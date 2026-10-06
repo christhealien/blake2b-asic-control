@@ -1,0 +1,29 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    environment:
+      # <app-id>_<service-name>_1
+      APP_HOST: blake2b-asic-control_web_1
+      APP_PORT: 8787
+      # The dashboard has its own login, so skip Umbrel's to avoid signing in twice
+      PROXY_AUTH_ADD: "false"
+
+  web:
+    # Built from app/ by GitHub Actions (.github/workflows/image.yml) for amd64 and arm64
+    image: ghcr.io/christhealien/blake2b-asic-control:1.14.0
+    user: "1000:1000"
+    init: true
+    restart: on-failure
+    stop_grace_period: 40s   # time for a running tuner to put its best setting back
+    volumes:
+      - ${APP_DATA_DIR}/data:/data
+    environment:
+      SCLITE_WEBUI_MINERS: /data/miners.json
+      SCLITE_TUNER_DATA: /data/tuner
+      # Umbrel's app_proxy sits in front: trust the client address it forwards (login back-off)
+      SCLITE_BEHIND_PROXY: "1"
+      # First sign-in: the default login Umbrel shows for this app (deterministicPassword)
+      SCLITE_WEBUI_DEFAULT_USER: umbrel
+      SCLITE_WEBUI_DEFAULT_PASSWORD: $APP_PASSWORD
+      TZ: UTC                # the starting time zone; pick yours under Settings → Time zone

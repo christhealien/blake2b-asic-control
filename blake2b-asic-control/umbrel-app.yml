@@ -1,0 +1,122 @@
+manifestVersion: 1
+id: blake2b-asic-control
+name: Blake2b ASIC Control
+tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.14.0
+category: developer
+version: "1.14.0"
+port: 8790
+description: >-
+  A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
+  SC-BOX / SC-BOX II, SC5 Pro / SC5 Pro II) and the HS line (HS Box). Every miner is controlled on
+  its own, and nothing leaves your network unless you turn on notifications.
+
+
+  Fleet: a card per miner with its 20-second hashrate, a 24-hour hashrate graph with marks for
+  restarts and setting changes, one-click presets, the pool list, restart and an estimated power
+  draw. The Miner page adds the live stats, the same graph, a chip map of every chip on the hash
+  boards, the best share (a record that survives restarts) and rejected shares sorted into stale
+  (pool timing) and not stale.
+
+
+  Presets: High, Middle, Low and Lowest power per miner (clock, voltage, PV and the fan curve to run
+  them with), plus Idle, the firmware's own sleep mode. The Schedule paints them across a week of
+  half-hour blocks, with scheduled restarts on the same grid. Fan curves are drawn by dragging
+  points; each miner runs its own.
+
+
+  The Tuner (SC Lite) maps every clock from underclock to overclock and finds the lowest voltage
+  each one runs cleanly, by watching every chip's hardware errors against that chip's own normal
+  rate while holding the boards at a temperature you choose. It confirms the winner and builds and
+  tests the four presets, each with its own fan curve, and can rebuild the presets later (for
+  example at another temperature) without a new search. Several miners can tune at once.
+
+
+  Notifications go to Telegram or Discord: a miner offline, hot, low hashrate, restarted on its
+  own, a tuning run finished, a new best-share record, a weak chip or a share rejected for a
+  reason other than stale. Two home-screen widgets show the fleet at a glance.
+
+
+  Uses the miners' stock web API only: no firmware changes. Sign in with the default username and
+  password shown here, then add your miners under Settings (and set your time zone there).
+developer: christhealien (built on Maveth's web dashboard)
+website: https://github.com/christhealien/blake2b-asic-control
+submitter: christhealien
+submission: https://github.com/christhealien/blake2b-asic-control
+repo: https://github.com/christhealien/blake2b-asic-control
+support: https://github.com/christhealien/blake2b-asic-control/issues
+gallery:
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.14.0
+releaseNotes: |-
+  **What's new in 1.14.0: the first public release**
+
+  - **A time zone setting** (Settings → Time zone). Schedules, restarts, logs and tuner files use the
+    app's time zone, which is UTC until you pick yours (it offers your browser's).
+  - **The 24-hour hashrate graph on the Miner page** too, between Live and Chips, and the Live panel's
+    Hashrate shows the latest 20-second reading like the Fleet card (the average since restart under it).
+  - **Graph marks that are close together share one label**, with every event in its hover.
+  - **Licensed MIT**, with the credits for the projects it builds on (Maveth's web dashboard, MIT;
+    crProductGuy's box tools, MIT). The app image is built on GitHub and pulled from
+    ghcr.io; the store is this GitHub repo.
+
+  **Earlier versions**
+
+  - **1.13.1:** Fleet card Hashrate tile shows the latest 20-second reading; Idle appears without a probe.
+  - **1.13.0:** Rebuild the presets from the last search; Idle preset; 24-hour hashrate graph on the
+    Fleet cards; rejected shares sorted into stale and not stale; best-share table shows the top 10.
+  - **1.12.1:** The tuner checks the miner accepts a fresh sign-in before it starts.
+  - **1.12.0:** Notifications on Telegram and Discord.
+  - **1.11.x:** Scheduled restarts; paint the week block by block; "the rest of the time: nothing".
+  - **1.10.x:** SC BOX and HS BOX shown as they really run (from real captures); best-share history;
+    safer tuner baseline (stock, what it runs now, or your own).
+  - **1.9.x:** The tuner maps every clock and voltage; chip health; power estimates; locks; security update.
+  - **1.8.x:** Best share tracking; Run plan; stock settings read from the firmware; one repo for the app
+    and its store.
+
+  Every version in detail: [CHANGELOG.md](https://github.com/christhealien/blake2b-asic-control/blob/master/CHANGELOG.md)
+dependencies: []
+path: ""
+deterministicPassword: true
+defaultUsername: umbrel
+widgets:
+  - id: "overview"
+    type: "four-stats"
+    refresh: "30s"
+    endpoint: "web:8788/widgets/overview"
+    link: ""
+    example:
+      type: "four-stats"
+      link: ""
+      items:
+        - title: "Hashrate"
+          text: "10.51"
+          subtext: "TH/s · 2/2 online"
+        - title: "Hottest ASIC"
+          text: "63"
+          subtext: "°C · SC Lite 2"
+        - title: "Best share"
+          text: "99.7M"
+          subtext: "since restart · SC Lite 1"
+        - title: "Tuner"
+          text: "625"
+          subtext: "MHz · testing 625 MHz"
+  - id: "miners"
+    type: "list"
+    refresh: "30s"
+    endpoint: "web:8788/widgets/miners"
+    link: ""
+    example:
+      type: "list"
+      link: ""
+      items:
+        - text: "🟢 SC Lite 1 · Hashing"
+          subtext: "5.45 TH/s · 60 °C · best 99.7 M"
+        - text: "🔧 SC Lite 2 · Tuning · testing 625 MHz"
+          subtext: "5.24 TH/s · 60 °C · best 12.3 M"
+        - text: "🔴 HS Box · Offline"
+          subtext: "not answering for 6 min"

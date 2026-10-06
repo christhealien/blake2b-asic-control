@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+app/local/
+app/data/
+*.zip
+.env
+# app data: miners.json holds the miners' passwords; never commit it
+miners.json
+auth.json
+sessions.json
+best_shares.json
+restart_times.json
+hashrate.json
+rejects.json

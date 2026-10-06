@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tuner · Blake2b ASIC Control</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
+  <style>
+    .bar { height: 10px; background: var(--panel2); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
+    .bar > span { display: block; height: 100%; background: var(--text); width: 0; transition: width .4s; }
+    .form-grid { display: grid; gap: .6rem .9rem; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+    .form-grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: var(--muted); }
+    .form-grid input[type=number], .form-grid select { width: 100%; }
+    .checks { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-top: .8rem; }
+    .checks label { display: flex; gap: .4rem; align-items: center; }
+    td.num, th.num { text-align: right; font-family: var(--mono); }
+    .res-pass { color: var(--ok); } .res-fail { color: var(--bad); } .res-base { color: var(--text); }
+    pre.log { max-height: 320px; overflow: auto; background: var(--panel2); border-radius: 10px; padding: .6rem .7rem; font-size: .78rem; margin: .5rem 0 0; white-space: pre-wrap; }
+    .big { font-size: 1.35rem; font-family: var(--mono); }
+    .chart { width: 100%; height: 190px; display: block; margin-top: .6rem; }
+    .legend { display: flex; gap: 1rem; font-size: .78rem; color: var(--muted); margin-top: .2rem; }
+    .legend i { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin-right: .35rem; border-radius: 2px; }
+    .table-wrap { overflow-x: auto; }
+    .intro { font-size: .88rem; margin: -.3rem 0 .6rem; }
+    .fsec { border-top: 1px solid var(--border); padding: .9rem 0 .4rem; }
+    .fsec-h { display: flex; align-items: center; gap: .6rem; margin-bottom: .6rem; flex-wrap: wrap; }
+    .fsec-h h3 { margin: 0; font-size: .98rem; }
+    .fsec-h .num { width: 1.6rem; height: 1.6rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+                   background: var(--panel2); border: 1px solid var(--border); font: 600 .8rem/1 var(--mono); color: var(--text); }
+    .tag { font-size: .7rem; padding: .12rem .5rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .tag.search { color: var(--text); border-color: #555; }
+    .tag.confirm { color: var(--text); border-color: #555; border-style: dashed; }
+    .tag.presets { color: var(--text); border-color: #555; border-style: dotted; }
+    .mode-cards.three { grid-template-columns: 1fr 1fr 1fr; }
+    @media (max-width: 1000px) { .mode-cards.three { grid-template-columns: 1fr; } }
+    .hint { color: var(--muted); font-size: .8rem; margin: .35rem 0 .5rem; line-height: 1.45; max-width: 70rem; }
+    .check { display: flex; gap: .45rem; align-items: center; font-size: .9rem; margin-top: .5rem; }
+    .opt-row { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; align-items: center; margin-top: .5rem; }
+    .opt-row .check { margin-top: 0; }
+    label.inline { display: flex; gap: .45rem; align-items: center; font-size: .85rem; color: var(--muted); }
+    label.inline input { width: 6.5rem; }
+    input:disabled { opacity: .45; }
+    .readout { color: var(--text); padding: .45rem 0; }
+    .mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
+    @media (max-width: 760px) { .mode-cards { grid-template-columns: 1fr; } }
+    .mode-card { display: flex; gap: .65rem; align-items: flex-start; padding: .8rem .9rem; border-radius: 12px; cursor: pointer;
+                 background: var(--panel2); border: 1px solid var(--border); }
+    .mode-card.on { border-color: var(--text); box-shadow: 0 0 0 1px var(--text) inset; background: var(--sel-bg); }
+    .mode-card input { margin-top: .2rem; }
+    .mode-card b { display: block; margin-bottom: .25rem; }
+    .mode-card small { color: var(--muted); font-size: .8rem; line-height: 1.45; }
+    .plan { margin: .4rem 0 0; padding-left: 1.3rem; }
+    .plan li { margin: .45rem 0; line-height: 1.5; }
+    .plan li b { color: var(--text); }
+    .note { border-radius: 10px; padding: .55rem .75rem; font-size: .85rem; margin: .5rem 0; border: 1px solid var(--border); }
+    .note.bad { color: var(--bad); border-color: #5a2323; background: #220c0c; }
+    .note.warn { color: var(--warn); border-color: #5a4a1f; background: #221b09; }
+    .kvline { display: grid; grid-template-columns: 9rem 1fr; gap: .3rem .8rem; font-size: .9rem; margin: .3rem 0 .6rem; }
+    .kvline dt { color: var(--muted); } .kvline dd { margin: 0; }
+    .runbar { display: flex; flex-wrap: wrap; gap: .5rem .9rem; align-items: center; }
+    .runbar select { min-width: 14rem; }
+    .runpill { cursor: pointer; }
+    .runpill.on { border-color: var(--text); color: var(--text); }
+    .preset-list { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); margin-top: .7rem; }
+    .preset-list > div { border: 1px solid var(--border); border-radius: 10px; padding: .5rem .7rem; background: var(--panel2); font-size: .85rem; }
+    .preset-list b { display: block; } .preset-list .mono { font-size: .82rem; }
+    .hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: .4rem; }
+    @media (max-width: 640px) { .hdr-right { align-items: flex-start; } }
+    /* chip map */
+    #mapPanel, #formPanel, #reviewPanel { scroll-margin-top: 84px; }
+    .board-row { display: grid; grid-template-columns: 6.2rem 1fr; gap: .7rem; align-items: center; margin: .45rem 0; }
+    .board-label { font-size: .85rem; }
+    .board-label .muted { display: block; font-size: .72rem; font-family: var(--mono); }
+    .cells { display: grid; grid-template-columns: repeat(var(--cols, 46), 1fr); gap: 3px; }
+    @media (max-width: 1100px) { .cells { grid-template-columns: repeat(var(--half, 23), 1fr); } }
+    @media (max-width: 640px) { .board-row { grid-template-columns: 1fr; gap: .25rem; } .board-label .muted { display: inline; margin-left: .5rem; } }
+    .cell { aspect-ratio: 1; border-radius: 4px; background: var(--cell-empty); box-shadow: inset 0 0 0 1px var(--cell-edge);
+            display: flex; align-items: center;
+            justify-content: center; font: 600 .62rem/1 var(--mono); color: var(--text); cursor: pointer; user-select: none; }
+    .cell.strong { color: var(--bg); }
+    .cell.over { background: var(--over); color: #fff; font-size: .8rem; box-shadow: none; }
+    .cell:hover, .cell.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+    .map-legend { display: flex; flex-wrap: wrap; gap: .35rem 1rem; align-items: center; font-size: .78rem; color: var(--muted); margin-top: .7rem; }
+    .map-legend .ramp { display: inline-flex; gap: 2px; vertical-align: middle; margin: 0 .35rem; }
+    .map-legend .sw { width: 14px; height: 14px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center;
+                      font: 700 .7rem/1 var(--mono); color: #fff; vertical-align: middle; }
+    .chip-tip { position: fixed; z-index: 60; pointer-events: none; background: var(--tip-bg); border: 1px solid var(--border); color: var(--text);
+                border-radius: 10px; padding: .45rem .6rem; font-size: .8rem; box-shadow: 0 8px 28px rgba(0,0,0,.45); display: none; }
+    .chip-tip b { font-family: var(--mono); }
+    tr.pick { cursor: pointer; } tr.pick:hover td { background: var(--panel2); } tr.pick.on td { background: var(--sel-bg); }
+    /* run plan: every step, ticked off as it goes */
+    .rp-params { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: .35rem 1.2rem;
+      margin: .7rem 0 .9rem; font-size: .84rem; }
+    .rp-params div { display: flex; gap: .5rem; min-width: 0; }
+    .rp-params .k { color: var(--muted); flex: 0 0 5.6rem; }
+    .rp-params .v { font-family: var(--mono); font-size: .8rem; overflow-wrap: anywhere; }
+    .rp-steps { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+    .rp-step { display: grid; grid-template-columns: 1.6rem 1fr; gap: .2rem .4rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
+    .rp-step > .ic { font: 700 1rem/1.35 var(--mono); text-align: center; }
+    .rp-step .t { font-weight: 600; }
+    .rp-step .t small { font-weight: 400; color: var(--muted); margin-left: .4rem; }
+    .rp-step .d { color: var(--muted); font-size: .8rem; margin-top: .1rem; }
+    .rp-step .n { font-size: .82rem; margin-top: .15rem; }
+    .rp-items { grid-column: 2; display: grid; gap: .15rem; margin-top: .35rem; }
+    .rp-item { display: grid; grid-template-columns: 1.2rem 7.5rem 1fr; gap: .4rem; font-size: .82rem; align-items: baseline; }
+    .rp-item > .ic { font: 700 .85rem/1.3 var(--mono); text-align: center; }
+    .rp-item .lbl { font-family: var(--mono); }
+    .rp-item .att { color: var(--muted); overflow-wrap: anywhere; }
+    .rp-item .att b { font-weight: 600; color: var(--text); }
+    @media (max-width: 640px) { .rp-item { grid-template-columns: 1.2rem 5.5rem 1fr; } }
+    .st-pass { color: var(--ok); } .st-fail { color: var(--bad); } .st-run { color: var(--text); }
+    .st-todo, .st-skip { color: var(--muted); } .st-stop { color: var(--warn); }
+    .rp-step.now { background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 8px; }
+    .st-run.ic { animation: rp-pulse 1.4s ease-in-out infinite; }
+    @keyframes rp-pulse { 50% { opacity: .35; } }
+    .dl-row { display: flex; flex-wrap: wrap; gap: .4rem .5rem; align-items: center; margin-top: .7rem; font-size: .82rem; }
+    .dl-row a.dl { border: 1px solid var(--border); border-radius: 10px; padding: .3rem .6rem; color: var(--text);
+      text-decoration: none; background: var(--panel2); }
+    .dl-row a.dl:hover { border-color: var(--text); }
+    .rp-legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .76rem; color: var(--muted); margin-top: .6rem; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <h1><span class="brand">Blake2b</span> ASIC Control</h1>
+    <div class="tabs">
+      <button type="button" onclick="location.href='/#fleet'">Fleet</button>
+      <button type="button" onclick="location.href='/#pools'">Pools</button>
+      <button type="button" onclick="location.href='/profiles.html'">Profiles</button>
+      <button type="button" onclick="location.href='/schedule.html'">Schedule</button>
+      <button type="button" class="active">Tuner</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="hdr-right">
+      <div class="row">
+        <button type="button" onclick="location.href='/#settings'">Settings</button>
+      </div>
+      <div class="row"><span id="statePill" class="pill">—</span><button type="button" class="theme-btn" data-theme-toggle>☀ Light</button></div>
+    </div>
+  </header>
+
+  <main>
+    <!-- MINER -->
+    <section class="panel compact">
+      <div class="runbar">
+        <label class="muted">Miner <select id="viewMiner"></select></label>
+        <span id="runPills"></span>
+      </div>
+      <p class="hint" style="margin:.35rem 0 0">Every miner has its own tuning run, results and chip map. Several miners can be
+        tuned at the same time; each run only changes its own miner.</p>
+    </section>
+
+    <!-- CURRENT -->
+    <section class="panel" id="currentPanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="curTitle" style="margin:0">Current step</h2>
+        <button type="button" class="danger hidden" id="btnStop">Stop this run</button>
+      </div>
+      <p class="muted" id="curEmpty" style="margin:.6rem 0 0">Not running. Start a run below.</p>
+      <div id="curBody" class="hidden">
+        <div class="row" style="margin-top:.5rem">
+          <span class="big" id="curPlan">—</span>
+          <span class="pill" id="curPhase">—</span>
+          <span class="pill" id="curVerdict">—</span>
+        </div>
+        <div style="margin-top:.8rem" class="row">
+          <div class="bar" style="flex:1"><span id="curBar"></span></div>
+          <span class="mono muted" id="curProgress">—</span>
+        </div>
+        <div class="kv">
+          <div><div class="label">Hashrate</div><div class="value" id="kvHash">—</div></div>
+          <div><div class="label">Hottest board</div><div class="value" id="kvTemp">—</div></div>
+          <div><div class="label">Closest chip to its limit</div><div class="value" id="kvChip">—</div></div>
+          <div><div class="label">New errors, all chips</div><div class="value" id="kvAll">—</div></div>
+        </div>
+        <svg class="chart" id="chart" viewBox="0 0 600 190" role="img"
+             aria-label="Each chip's new errors as a share of its own limit; a bar above the red line fails the step"></svg>
+        <div class="legend">
+          <span><i style="background:var(--text)"></i>a chip's new errors, as % of its own limit (label: errors / limit)</span>
+          <span><i style="background:var(--bad)"></i>limit: a bar above it fails the step</span>
+          <span id="chartNote"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- RUN PLAN -->
+    <section class="panel hidden" id="planPanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Run plan</h2>
+        <span class="pill" id="planState">—</span>
+      </div>
+      <div class="rp-params" id="planParams"></div>
+      <ol class="rp-steps" id="planSteps"></ol>
+      <div class="rp-legend"><span><b class="st-pass">✓</b> done</span><span><b class="st-fail">✗</b> failed</span>
+        <span><b class="st-run">●</b> running now</span><span><b class="st-todo">–</b> not done yet</span>
+        <span><b class="st-skip">⤼</b> skipped (not needed)</span><span><b class="st-stop">■</b> cut short</span></div>
+    </section>
+
+    <!-- CHIP MAP -->
+    <section class="panel" id="mapPanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Chip map</h2>
+        <label class="muted" style="font-size:.85rem">Showing
+          <select id="mapSel" style="max-width:22rem"><option value="live">Live: current step</option></select></label>
+      </div>
+      <p class="muted" id="mapCaption" style="font-size:.85rem;margin:.5rem 0 .2rem">Waiting for the first reading…</p>
+      <div id="map"></div>
+      <div class="map-legend" id="mapLegend"></div>
+      <details style="margin-top:.7rem">
+        <summary class="muted" style="font-size:.85rem">Chip table</summary>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Board</th><th class="num">Chip</th><th class="num">New errors</th><th class="num">Limit</th>
+            <th class="num">% of limit</th><th class="num">Normal /hour</th></tr></thead>
+          <tbody id="mapTable"></tbody>
+        </table></div>
+      </details>
+    </section>
+
+    <!-- BEST -->
+    <section class="panel compact" id="bestPanel">
+      <h2>Best setting</h2>
+      <div id="bestBody" class="muted">No passing setting yet.</div>
+    </section>
+
+    <!-- START FORM -->
+    <section class="panel" id="formPanel">
+      <h2>Start a tuning run</h2>
+      <p class="muted intro">Work through the sections below, then press <b>Review</b>. Nothing changes on the miner
+        until you confirm on the next screen. Sections that don't apply to the option you pick are hidden.</p>
+
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">1</span><h3>What do you want to do?</h3></div>
+        <div class="mode-cards three">
+          <label class="mode-card"><input type="radio" name="mode" value="search" id="modeSearch" checked />
+            <span><b>Map every clock and voltage</b>
+            <small>Tests every clock from your lowest (underclocked) to your highest (overclocked), each at its own lowest
+              clean voltage, so you get the whole curve: what each clock really needs. The fastest clean clock is
+              confirmed and the presets are built from the curve. Takes several hours.</small></span></label>
+          <label class="mode-card"><input type="radio" name="mode" value="confirm" id="modeConfirm" />
+            <span><b>Confirm one setting for hours</b>
+            <small>For a setting you already have in mind, such as the winner of a search. It runs just that setting
+              for hours and ends with CONFIRMED (the miner stays on it) or REJECTED (back to the baseline).</small></span></label>
+          <label class="mode-card"><input type="radio" name="mode" value="presets" id="modePresets" />
+            <span><b>Rebuild the presets from the last search</b>
+            <small>Builds and tests High, Middle, Low and Lowest power again from the voltage curve the last search
+              measured, without mapping it again: for example at other temperatures. About 2–4 hours.</small></span></label>
+        </div>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">2</span><h3>Miner</h3><span class="tag">All options</span></div>
+        <div class="readout"><b id="fMinerName">—</b> <span class="muted" style="font-size:.85rem">(change it at the top of the page)</span></div>
+        <div class="row" style="gap:.6rem;margin:.1rem 0 .2rem">
+          <span id="hwLine" class="mono" style="font-size:.85rem">—</span>
+          <button type="button" id="btnProbe">Probe now</button>
+        </div>
+        <p class="hint">The tuner only runs on a miner that has been <b>probed</b>: the dashboard signs in to it and reads
+          its model, firmware, hash boards, chips and fans, so the tuner knows what it's working with. New miners are
+          probed automatically within a minute or so of being added; <i>Probe now</i> does it straight away (for example
+          after a firmware update).</p>
+        <label class="check"><input type="checkbox" id="f_any_model" /> Allow miner models other than the SC Lite (untested)</label>
+        <p class="hint">The tuner is tested on the SC Lite. It reads the miner's model first and changes nothing on any
+          other model unless this is ticked. SC-BOX and HS Box store their settings in a format the tuner can't use yet.</p>
+      </div>
+
+      <div class="fsec presets-mode hidden">
+        <div class="fsec-h"><span class="num">3</span><h3>Built from</h3><span class="tag presets">Rebuild only</span></div>
+        <div id="srcBody" class="readout">—</div>
+        <div class="mode-cards" role="radiogroup" aria-label="Baseline for the rebuild" style="margin-top:.6rem">
+          <label class="mode-card"><input type="radio" name="pbase" id="pbaseFresh" value="fresh" checked />
+            <span><b>Fresh baseline first (recommended)</b><small>Runs the search's baseline setting again first, so every
+              chip's normal error rate is today's: chips drift with time, restarts and room temperature.</small></span></label>
+          <label class="mode-card"><input type="radio" name="pbase" id="pbaseReuse" value="reuse" />
+            <span><b>Reuse the search's baseline</b><small>No baseline run: each chip is judged against the normal rate the
+              search measured. Fine when that search was recent.</small></span></label>
+        </div>
+        <div class="form-grid pbase-fresh">
+          <label>Baseline minutes<input type="number" id="f_pbase_min" step="5" value="30" /></label>
+        </div>
+        <p class="hint">Only the presets are tested again; the voltage curve isn't changed. Each preset starts at the curve's
+          voltage for its clock. Warmer than the search's temperature, chips make more errors, so a preset may need one
+          voltage step more, or one clock step less (that's the right answer for that temperature, not a wrong reading).
+          Cooler is always safe, with louder fans. Only clocks the search mapped can be used: for others, run a new search.</p>
+      </div>
+
+      <div class="fsec confirm-only hidden">
+        <div class="fsec-h"><span class="num">3</span><h3>Setting to confirm</h3><span class="tag confirm">Confirm only</span></div>
+        <div class="form-grid">
+          <label>MHz<input type="number" id="f_confirm_mhz" step="25" value="650" /></label>
+          <label>mV<input type="number" id="f_confirm_mv" step="100" value="9200" /></label>
+          <label>Hours to run it<input type="number" id="f_confirm_hours" step="0.5" value="4" /></label>
+          <label>PV<span class="mono readout" id="confirmPv">—</span></label>
+        </div>
+        <p class="hint">The time is split into rounds as long as one test (section 7). Each round is judged like a search
+          test. A round that fails gets one retest; if the retest fails too, the setting is REJECTED.</p>
+      </div>
+
+      <div class="fsec not-presets">
+        <div class="fsec-h"><span class="num sec-base">3</span><h3>Baseline</h3><span class="tag">Search and confirm</span></div>
+        <div class="readout" id="stockNote">—</div>
+        <div class="mode-cards" role="radiogroup" aria-label="Baseline">
+          <label class="mode-card"><input type="radio" name="baseline" id="baseStock" value="stock" checked />
+            <span><b>Stock (recommended)</b><small>The firmware's own setting, shown above. Right for a healthy miner.</small></span></label>
+          <label class="mode-card"><input type="radio" name="baseline" id="baseCurrent" value="current" />
+            <span><b>What it runs now</b><small id="baseCurrentNote">For a miner turned down because it can't run stock steadily.</small></span></label>
+          <label class="mode-card"><input type="radio" name="baseline" id="baseCustom" value="custom" />
+            <span><b>My own</b><small>Any clock and voltage inside this miner's hard limits that you know it runs cleanly.</small></span></label>
+        </div>
+        <div class="form-grid">
+          <label class="base-custom">Baseline MHz<input type="number" id="f_start_mhz" step="25" /></label>
+          <label class="base-custom">Baseline mV<input type="number" id="f_mv" step="100" /></label>
+          <label>Baseline minutes<input type="number" id="f_baseline_min" step="1" /></label>
+        </div>
+        <p class="hint" id="baseHint">The baseline runs first so the tuner can learn every chip's normal error rate, and
+          every test is compared with that (a faster clock is allowed proportionally more errors, since it does more work).
+          It has to be a setting the miner runs <b>steadily</b>: a board reset during the baseline stops the run at once.
+          Whatever you pick, if nothing is confirmed or the run stops early,
+          the miner goes back to <b>what it ran before the run</b>, not to stock. Longer = a more accurate baseline
+          (60 min is a good choice).</p>
+      </div>
+
+      <div class="fsec search-only">
+        <div class="fsec-h"><span class="num">4</span><h3>Clocks and voltages to map</h3><span class="tag search">Search only</span></div>
+        <div class="form-grid">
+          <label>Lowest MHz<input type="number" id="f_min_mhz" step="25" /></label>
+          <label>Highest MHz<input type="number" id="f_max_mhz" step="25" /></label>
+          <label>MHz per step<input type="number" id="f_step" step="25" /></label>
+          <label>Lowest mV<input type="number" id="f_min_mv" step="100" /></label>
+          <label>Highest mV<input type="number" id="f_max_mv" step="100" /></label>
+          <label>mV per step<input type="number" id="f_mv_step" step="25" /></label>
+        </div>
+        <p class="hint">The curve starts at <b>Lowest MHz</b> and works up one step at a time to <b>Highest MHz</b>, so it
+          covers underclocking and overclocking in one run. At each clock it finds the <b>lowest voltage that stays clean</b>:
+          the lowest clock starts at the baseline voltage; every higher clock starts at the voltage that was lowest one clock
+          slower, plus one step if the clock before needed more. If that isn't clean it adds voltage a step at a time (up to <i>Highest mV</i>); then it lowers voltage a
+          step at a time until it fails (down to <i>Lowest mV</i>; it stops after two failures in a row, or one at a voltage
+          a slower clock already failed at). <b>Every voltage is tested at its own clock</b>: nothing is assumed from another
+          clock. The curve ends at the first clock that isn't clean at any allowed voltage. The miner sets clocks in 12.5 MHz
+          steps, so a 25 MHz step lands every test on a clock it really runs.</p>
+        <label class="check"><input type="checkbox" id="f_trim" /> Find the lowest voltage at every clock (recommended)</label>
+        <p class="hint">Off: each clock only gets voltage added until it's clean, never lowered: a quicker, rougher curve.</p>
+        <input type="checkbox" id="f_boost" hidden checked />
+        <div class="opt-row">
+          <label class="check"><input type="checkbox" id="f_confirm" /> Confirm the winner with one more, longer test</label>
+          <label class="inline">for <input type="number" id="f_confirm_min" step="5" placeholder="2× test" /> min</label>
+        </div>
+        <p class="hint">Runs the best setting once more at the end, by default for twice the test length, so the winner
+          has the most time behind it. If it fails, the next-best passing setting is confirmed instead.</p>
+      </div>
+
+      <div class="fsec not-presets">
+        <div class="fsec-h"><span class="num sec-pv">5</span><h3>PV</h3><span class="tag">Search and confirm</span></div>
+        <div class="form-grid">
+          <label>PV offset above mV<input type="number" id="f_pv_offset" step="50" placeholder="auto" /></label>
+        </div>
+        <p class="hint" id="pvNote"></p>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-h"><span class="num sec-test">6</span><h3>Test length and safety</h3><span class="tag">All options</span></div>
+        <div class="form-grid">
+          <label id="lblHoldMin">Minutes per test<input type="number" id="f_hold_min" step="1" /></label>
+          <label>Sensitivity<input type="number" id="f_sigma" step="0.5" /></label>
+          <label>Abort at °C<input type="number" id="f_abort_c" step="1" /></label>
+        </div>
+        <p class="hint"><b>Minutes per test:</b> how long each setting is watched (plus 3 minutes to settle). Longer catches
+          a slightly weak chip more reliably; bad settings still fail early.
+          <b>Sensitivity:</b> how sure the tuner must be that a chip got worse before a test fails. Errors are random, and
+          every chip is checked, so the limits are set so that a perfectly good setting fails by bad luck only about 1 test
+          in 20 at 2.5 (the default). Lower is stricter (2.0: about 1 in 5, more false fails); higher is more forgiving
+          (3.0: about 1 in 100, but a slightly weak setting can slip through). <b>Abort:</b> if any board reaches this temperature the run stops
+          and the miner goes back to what it ran before the run.</p>
+        <label class="check"><input type="checkbox" id="f_weak" /> Go easier on chips that are already noisy at the baseline (recommended)</label>
+        <p class="hint">A weak or damaged chip makes far more errors than the rest no matter the clock or voltage. Judged like
+          the others, its random ups and downs fail good settings and push the voltage up for every chip. With this on, a
+          chip at least 8 times noisier than the typical chip during the baseline only fails a step when it gets clearly
+          worse (1.5 times its own normal rate). The board totals are judged on the normal chips. The Run plan lists them.</p>
+      </div>
+
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">7</span><h3>Fans during the run</h3><span class="tag">All options</span></div>
+        <div class="mode-cards">
+          <label class="mode-card"><input type="radio" name="fans" value="hold" id="fansHold" checked />
+            <span><b>Hold a steady temperature (recommended)</b>
+            <small>The tuner takes over this miner's fans and keeps the hottest board at your target, so every setting is
+              judged at the same temperature. It records how much fan each setting needs; that's what the preset fan curves
+              are built from. The dashboard's auto fan waits for this miner until the run ends.</small></span></label>
+          <label class="mode-card"><input type="radio" name="fans" value="leave" id="fansLeave" />
+            <span><b>Leave the fans alone</b>
+            <small>Your auto fan curve (or the miner's own control) keeps running and the tuner only changes MHz, mV and PV.
+              Temperatures can drift between tests, and presets get no fan curve of their own.</small></span></label>
+        </div>
+        <div class="form-grid hold-only" style="margin-top:.7rem">
+          <label id="lblHoldC">Target temperature °C<input type="number" id="f_fan_hold_c" step="1" /></label>
+          <label>Lowest fan %<input type="number" id="f_fan_min" step="5" /></label>
+        </div>
+        <p class="hint hold-only" id="holdHint"><b>Target:</b> the temperature the hottest board is held at during the search (and for the
+          High preset). 60 °C is a good start. <b>Lowest fan:</b> the fans never go below this, even when the boards are cool.</p>
+      </div>
+
+      <div class="fsec search-only">
+        <div class="fsec-h"><span class="num">8</span><h3>Presets</h3><span class="tag search">Search only</span></div>
+        <label class="check"><input type="checkbox" id="f_presets" /> Build and test presets at the end</label>
+        <p class="hint">After the search, four presets are made for this miner and each is tested on its own:
+          <b>High</b> (the best clock), <b>Lowest power</b> (the <i>Lowest MHz</i> from section 4), and <b>Middle</b> and
+          <b>Low</b> spread evenly between them. Each uses the lowest clean voltage the curve measured at its clock. A preset that fails
+          gets more voltage, then a lower clock, up to 3 tries. They appear on the <a href="/profiles.html">Profiles</a> page,
+          where one click puts a preset and its fan curve on the miner.</p>
+        <div class="form-grid presets-only">
+          <label>Minutes per preset<input type="number" id="f_preset_min" step="1" /></label>
+          <label class="hold-only">Warmest preset °C<input type="number" id="f_preset_max_c" step="1" /></label>
+        </div>
+        <p class="hint presets-only hold-only" id="presetTemps"></p>
+      </div>
+
+      <div class="fsec presets-mode hidden" id="ppSec">
+        <div class="fsec-h"><span class="num">8</span><h3>Presets to build</h3><span class="tag presets">Rebuild only</span></div>
+        <div class="form-grid">
+          <label>Minutes per preset<input type="number" id="f_ppreset_min" step="1" value="30" /></label>
+        </div>
+        <div class="form-grid hold-temps" style="margin-top:.5rem">
+          <label>High °C<input type="number" id="f_pt0" step="1" /></label>
+          <label>Middle °C<input type="number" id="f_pt1" step="1" /></label>
+          <label>Low °C<input type="number" id="f_pt2" step="1" /></label>
+          <label>Lowest power °C<input type="number" id="f_pt3" step="1" /></label>
+        </div>
+        <p class="hint" id="ptHint"></p>
+      </div>
+
+      <p class="hint" style="margin-top:1rem" id="fanFootnote"></p>
+      <div class="row" style="margin-top:.6rem">
+        <button type="button" class="primary" id="btnReview">Review before starting</button>
+        <span class="muted" id="estimate"></span>
+      </div>
+    </section>
+
+    <!-- REVIEW -->
+    <section class="panel hidden" id="reviewPanel">
+      <h2>Check before starting</h2>
+      <p class="muted intro">This is exactly what the tuner will do. Nothing has changed on the miner yet.</p>
+      <div id="reviewBody"></div>
+      <div class="row" style="margin-top:1rem">
+        <button type="button" class="primary" id="btnStart">Start tuner</button>
+        <button type="button" id="btnBack">Back to edit</button>
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+    <section class="panel">
+      <h2>Finished tests</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th class="num">MHz</th><th class="num">mV</th><th class="num">PV</th>
+            <th>Result</th><th class="num">TH/s</th><th class="num" title="Estimated wall power (calibrate it on the Miner page)">≈ W</th><th class="num" title="Watts per TH/s: estimated power ÷ the hashrate measured in this test. Lower is more efficient.">W/TH</th><th class="num">Max °C</th><th>Reason</th></tr></thead>
+          <tbody id="resBody"><tr><td colspan="10" class="muted">None yet.</td></tr></tbody>
+        </table>
+      </div>
+      <div id="failChips" class="muted" style="margin-top:.7rem"></div>
+    </section>
+
+    <section class="panel compact">
+      <details>
+        <summary class="muted">Tuner log</summary>
+        <pre class="log" id="log"></pre>
+      </details>
+      <div class="dl-row" id="dlRow">
+        <span class="muted">Save this miner's tuner files:</span>
+        <a class="dl" data-what="log" href="#">Log (.txt)</a>
+        <a class="dl" data-what="fulllog" href="#">Log, every run (.txt)</a>
+        <a class="dl" data-what="results" href="#">Results (.csv)</a>
+        <a class="dl" data-what="chips" href="#">Chip data (.csv)</a>
+        <a class="dl" data-what="live" href="#">Live readings (.csv)</a>
+        <a class="dl" data-what="zip" href="#">Everything (.zip)</a>
+      </div>
+      <p class="footer-note" id="folder"></p>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <div class="chip-tip" id="chipTip"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const OPTS = ["baseline_min","hold_min","start_mhz","max_mhz","step","mv","max_mv","min_mv","mv_step","sigma","abort_c"];
+const FAN_OPTS = ["fan_hold_c","fan_min","preset_min","preset_max_c"];
+let formFilled = false;
+let viewId = new URLSearchParams(location.search).get("miner") || "";
+let HW = {};   // miner id -> {hardware, line, probing}
+async function loadHw() {
+  try { HW = (await api("GET", "/api/hardware/list")).miners || {}; } catch (e) { /* keep the last */ }
+  showHw();
+}
+const TL = () => (HW[viewId] || {}).tuner || { stock: { mhz: 625, mv: 9100, pv: 9400 }, source: "assumed", pv_gap: 300,
+  advised: { mhz: [400, 700], mv: [8500, 9400] }, limits: { mhz: [300, 775], mv: [8100, 9600] },
+  defaults: { start_mhz: 625, max_mhz: 700, mv: 9100, max_mv: 9300, min_mv: 8700, confirm_mhz: 650, confirm_mv: 9100 } };
+const PLAN_KEYS = ["start_mhz", "max_mhz", "mv", "max_mv", "min_mv"];
+function useStock(say) {
+  const t = TL(), d = t.defaults;
+  for (const k of PLAN_KEYS) $("f_" + k).value = d[k];
+  $("f_confirm_mhz").value = d.confirm_mhz; $("f_confirm_mv").value = d.confirm_mv;
+  syncBaseline();
+  if (typeof updatePv === "function") updatePv();
+  if (say) toast(`Baseline set to ${t.stock.mhz} MHz / ${t.stock.mv} mV (stock), climbing to ${d.max_mhz} MHz`);
+}
+function showStock() {
+  const t = TL(), s = t.stock, el = $("stockNote"); if (!el) return;
+  const run = Math.floor(s.mhz / 12.5) * 12.5;
+  const c = t.current;
+  const now = c ? ` · <span class="muted" style="font-size:.85rem">runs now: ${c.mhz} MHz · ${c.mv} mV · PV ${c.pv} (at the last probe)</span>` : "";
+  el.innerHTML = t.source === "unsupported"
+    ? `<span style="color:var(--warn)">${esc(t.format_note.charAt(0).toUpperCase() + t.format_note.slice(1))}.</span>${t.stock_text ? ` <span class="muted" style="font-size:.85rem">Stock plan as the miner writes it: <code>${esc(t.stock_text)}</code>${t.running_text && t.running_text !== t.stock_text ? `; it runs <code>${esc(t.running_text)}</code>` : ""}</span>` : ""}`
+    : t.source === "firmware"
+    ? `<b>${s.mhz} MHz · ${s.mv} mV · PV ${s.pv}</b> <span class="muted" style="font-size:.85rem">this miner's firmware stock setting${run !== s.mhz ? ` (runs at ${run} MHz)` : ""}</span>${now}`
+    : `<span style="color:var(--warn)">This miner's stock setting hasn't been read yet. Press Probe now (section 2); the tuner's hard limits are worked out from it.</span>`;
+  syncBaseline();
+}
+const baseKind = () => (document.querySelector("input[name=baseline]:checked") || {}).value || "stock";
+function syncBaseline() {
+  const t = TL(), k = baseKind();
+  document.querySelectorAll(".base-custom").forEach(e => e.style.display = k === "custom" ? "" : "none");
+  if ($("baseCurrentNote")) $("baseCurrentNote").textContent = t.current
+    ? `${t.current.mhz} MHz · ${t.current.mv} mV at the last probe. For a miner turned down because it can't run stock steadily.`
+    : "Not known yet: press Probe now. For a miner turned down because it can't run stock steadily.";
+  if (k === "stock") { $("f_start_mhz").value = t.stock.mhz; $("f_mv").value = t.stock.mv; }
+  else if (k === "current" && t.current) { $("f_start_mhz").value = t.current.mhz; $("f_mv").value = t.current.mv; }
+  else if (k === "custom" && !$("f_start_mhz").value) { $("f_start_mhz").value = (t.current || t.stock).mhz; $("f_mv").value = (t.current || t.stock).mv; }
+}
+document.querySelectorAll("input[name=baseline]").forEach(r => r.addEventListener("change", () => { syncBaseline(); updatePv(); estimate(); }));
+function showHw() {
+  showStock();
+  const h = HW[viewId] || {};
+  const hw = h.hardware;
+  const el = $("hwLine");
+  el.textContent = h.probing ? "probing…" : hw && hw.ok ? "Probed: " + h.line : (h.line ? "Not ready: " + h.line : "Not probed yet");
+  el.style.color = hw && hw.ok ? (hw.profile === "sc-lite" ? "var(--ok)" : "var(--warn)") : "var(--warn)";
+  $("btnProbe").textContent = hw && hw.ok ? "Probe again" : "Probe now";
+}
+let lastStatus = null;
+
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast show" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.className = "toast", 5000);
+}
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: {"Content-Type": "application/json"},
+                                body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { location.href = "/login.html?next=/tuner.html"; throw new Error("not signed in"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const chipLabel = (k) => { const m = /^b(\d+)c(\d+)$/.exec(k || ""); return m ? `board ${m[1]} chip ${m[2]}` : (k || "—"); };
+
+async function loadMiners() {
+  try {
+    const j = await api("GET", "/api/miners");
+    const sel = $("viewMiner"); sel.innerHTML = "";
+    for (const m of j.miners || []) {
+      if (m.demo) continue;
+      const o = document.createElement("option");
+      o.value = m.id; o.textContent = `${m.name || m.id} (${m.ip || ""})`;
+      sel.appendChild(o);
+    }
+    if (!sel.options.length) sel.innerHTML = "<option value=''>no miners yet: add one under Settings</option>";
+    if (viewId && [...sel.options].some(o => o.value === viewId)) sel.value = viewId;
+  } catch (e) { toast("Could not load miners: " + e.message, true); }
+}
+
+function fillForm(d, info) {
+  if (formFilled) return;
+  const t = TL();
+  d = Object.assign({}, d, t.defaults);           // this miner's stock-based clock / voltage defaults
+  const raw = (info && info.options) || d;
+  // a rebuild run's options don't describe a search: keep this miner's defaults for the search fields
+  const src = raw.mode === "presets" ? Object.assign({}, d, raw, { start_mhz: d.start_mhz, mv: d.mv, baseline_min: d.baseline_min,
+    baseline: "stock", fan_hold_c: d.fan_hold_c }) : raw;
+  for (const k of OPTS) $("f_" + k).value = src[k] ?? d[k];
+  // the baseline: the last run's choice (stock unless chosen); the last run's limits only if they fit this miner
+  const bk = src.baseline || "stock";
+  ($(bk === "current" ? "baseCurrent" : bk === "custom" ? "baseCustom" : "baseStock")).checked = true;
+  if (bk === "custom") { $("f_start_mhz").value = src.start_mhz; $("f_mv").value = src.mv; }
+  syncBaseline();
+  const inR = (v, r) => v >= r[0] && v <= r[1];
+  if (!inR(+$("f_max_mhz").value, t.limits.mhz) || +$("f_max_mhz").value <= d.start_mhz) $("f_max_mhz").value = d.max_mhz;
+  for (const k of ["max_mv", "min_mv"]) if (!inR(+$("f_" + k).value, t.limits.mv) || !$("f_" + k).value) $("f_" + k).value = d[k];
+  if (+$("f_max_mv").value < d.mv) $("f_max_mv").value = d.max_mv;
+  if (+$("f_min_mv").value > d.mv) $("f_min_mv").value = d.min_mv;
+  for (const k of ["boost","trim","confirm","weak"]) $("f_" + k).checked = src[k] ?? true;
+  $("f_boost").checked = true;      // the curve always adds voltage where a clock needs it
+  for (const k of FAN_OPTS) $("f_" + k).value = (src[k] ? src[k] : d[k]);
+  (src.fans === "leave" ? $("fansLeave") : $("fansHold")).checked = true;
+  $("f_presets").checked = src.presets ?? true;
+  $("f_any_model").checked = !!src.any_model;
+  $("f_pv_offset").value = src.pv_offset ?? "";
+  const lowDef = Math.max(300, Math.floor(((+$("f_start_mhz").value || d.start_mhz) - 100) / (num("f_step") || 25)) * (num("f_step") || 25));
+  $("f_min_mhz").value = src.min_mhz ?? src.preset_min_mhz ?? lowDef;
+  $("f_confirm_min").value = src.confirm_min ?? "";
+  if (src.mode === "presets") {
+    $("modePresets").checked = true;
+    ($(raw.baseline === "reuse" ? "pbaseReuse" : "pbaseFresh")).checked = true;
+    if (raw.baseline_min) $("f_pbase_min").value = raw.baseline_min;
+    if (raw.preset_min) $("f_ppreset_min").value = raw.preset_min;
+    (raw.preset_temps || []).forEach((t, i) => $("f_pt" + i).value = t);
+    $("f_confirm_mhz").value = d.confirm_mhz; $("f_confirm_mv").value = d.confirm_mv;
+  } else if (src.mode === "confirm") {
+    $("modeConfirm").checked = true;
+    for (const k of ["confirm_mhz","confirm_mv","confirm_hours"]) if (src[k] != null) $("f_" + k).value = src[k];
+  } else { $("f_confirm_mhz").value = d.confirm_mhz; $("f_confirm_mv").value = d.confirm_mv; }
+  formFilled = true; applyMode();
+}
+
+const mode = () => $("modeConfirm").checked ? "confirm" : $("modePresets").checked ? "presets" : "search";
+const pbase = () => $("pbaseReuse").checked ? "reuse" : "fresh";
+let SRC = {}, srcFor = "";      // the last search a rebuild would build from, per miner
+async function loadSource(force) {
+  if (!viewId || (!force && srcFor === viewId)) return;
+  srcFor = viewId;
+  try { SRC[viewId] = await api("GET", "/api/tuner/source?miner=" + encodeURIComponent(viewId)); }
+  catch (e) { SRC[viewId] = { available: false, why: e.message }; }
+  showSource();
+}
+function defaultTemps(src) {
+  if (src.last_temps && new Set(src.last_temps).size > 1) return src.last_temps;
+  const o = src.options || {}, hold = +(src.hold_c || o.fan_hold_c || 60), warm = Math.max(hold, Math.min(+(o.preset_max_c || 70), num("f_abort_c") - 12));
+  return [0, 1, 2, 3].map(i => Math.round(hold + (warm - hold) * i / 3));
+}
+function showSource() {
+  const src = SRC[viewId], el = $("srcBody"); if (!el) return;
+  if (!src) { el.innerHTML = '<span class="muted">Reading the last search…</span>'; return; }
+  if (!src.available) { el.innerHTML = `<span style="color:var(--warn)">${esc(src.why || "no search found")}</span>`; return; }
+  const ago = Math.round((Date.now() - new Date(src.base_when.replace(" ", "T")).getTime()) / 86400000);
+  el.innerHTML = `<b>${esc(src.label)}</b> <span class="muted" style="font-size:.85rem">(baseline ${esc(src.base_when)}${ago >= 1 ? `, ${ago} day${ago > 1 ? "s" : ""} ago` : ""})</span><br>
+    <span class="mono" style="font-size:.85rem">curve: ${src.curve.map(c => `${c[0]}/${c[1]}`).join(" · ")}</span><br>
+    <span style="font-size:.85rem">High: <b>${src.best[0]} MHz · ${src.best[1]} mV</b>${src.best_confirmed ? " (confirmed)" : " (fastest clean clock; confirm was off)"} ·
+      baseline ${src.baseline.mhz} MHz · ${src.baseline.mv} mV${src.hold_c ? ` held at ${src.hold_c} °C` : ""} · ${src.base_chips} chips' normal rates saved</span>`;
+  if (!$("f_pt0").value) defaultTemps(src).forEach((t, i) => $("f_pt" + i).value = t);
+  if (!src.base_chips) { $("pbaseFresh").checked = true; $("pbaseReuse").disabled = true; } else $("pbaseReuse").disabled = false;
+  syncOptions(); estimate();
+}
+const ptemps = () => [0, 1, 2, 3].map(i => num("f_pt" + i));
+const fans = () => $("fansLeave").checked ? "leave" : "hold";
+const minerName = () => { const o = $("viewMiner").selectedOptions[0]; return o ? o.textContent : "—"; };
+function presetTemps(b) {
+  const hold = b.fan_hold_c, warm = Math.max(hold, Math.min(b.preset_max_c, b.abort_c - 12));
+  return [0, 1, 2, 3].map(i => Math.round(hold + (warm - hold) * i / 3));
+}
+const num = (id) => +$(id).value;
+function pvOffset() { const o = $("f_pv_offset").value.trim(); return o === "" ? null : +o; }
+function pvText(mv) {
+  const o = pvOffset();
+  const t = TL();
+  return o === null ? (t.source === "firmware" ? `PV auto (mV ${t.pv_gap >= 0 ? "+" : "−"} ${Math.abs(t.pv_gap)}, the stock gap)` : "PV auto (mV + the miner's current gap)") : `PV ${(+mv) + o} (mV ${o >= 0 ? "+" : "−"} ${Math.abs(o)})`;
+}
+function updatePv() {
+  const o = pvOffset();
+  $("confirmPv").textContent = pvText($("f_confirm_mv").value);
+  $("pvNote").innerHTML = o === null
+    ? (TL().source === "firmware"
+      ? `<b>Auto (recommended):</b> every setting keeps the gap between mV and PV of this miner's stock setting (${TL().stock.mv} mV with PV ${TL().stock.pv}, so PV = mV ${TL().pv_gap >= 0 ? "+" : "−"} ${Math.abs(TL().pv_gap)}). Only enter an offset if you know your model needs a different one. The tuner never changes PV on its own.`
+      : "<b>Auto (recommended):</b> each setting keeps the gap between mV and PV that the miner already has. A stock SC Lite runs 9100 mV with PV 9400, so PV = mV + 300 (9200 mV gets PV 9500). Only enter an offset if you know your model needs a different one. The tuner never changes PV on its own.")
+    : `<b>Fixed offset:</b> PV = mV ${o >= 0 ? "+" : "−"} ${Math.abs(o)} for every setting (the baseline gets ${pvText($("f_mv").value)}). Clear the box to go back to auto.`;
+}
+function syncOptions() {
+  $("f_min_mv").disabled = !$("f_trim").checked;
+  document.querySelectorAll(".mode-card").forEach(c => c.classList.toggle("on", c.querySelector("input").checked));
+  const c = mode() === "confirm", P = mode() === "presets";
+  const hold = fans() === "hold", pre = !c && !P && $("f_presets").checked;
+  document.querySelectorAll(".hold-only").forEach(e => e.classList.toggle("hidden", !hold));
+  document.querySelectorAll(".presets-only").forEach(e => e.classList.toggle("hidden", !pre));
+  // a rebuild holds its fresh baseline where the search held it, and each preset at its own temperature
+  $("lblHoldC").classList.toggle("hidden", !hold || P);
+  $("lblHoldMin").classList.toggle("hidden", P);
+  document.querySelectorAll(".hold-temps").forEach(e => e.classList.toggle("hidden", !hold));
+  document.querySelectorAll(".pbase-fresh").forEach(e => e.classList.toggle("hidden", pbase() !== "fresh"));
+  if (P) {
+    const src = SRC[viewId] || {};
+    $("holdHint").innerHTML = `<b>During a rebuild</b> the fresh baseline is held at ${src.hold_c ? `<b>${src.hold_c} °C</b>, where the search held it` : "the High preset's temperature"}, so the error rates compare like for like; each preset is then held at its own temperature (section ${document.querySelector("#ppSec .num").textContent}). <b>Lowest fan:</b> the fans never go below this.`;
+    const t = ptemps(), h = +(src.hold_c || 0);
+    $("ptHint").innerHTML = hold
+      ? `Each preset is held at its own temperature while it's tested, and gets a fan curve built from the fan it needed there.${h ? ` The curve was measured at ${h} °C: a preset ${t.some(x => x > h) ? "warmer than that may need more voltage or one clock less" : "at or below that is the easy case (louder fans, same or less voltage)"}.` : ""}
+         A preset that fails gets one voltage step more, then one clock step less, up to 3 tries; a close call is retested once.`
+      : "Fans are left alone, so the presets are tested at whatever temperature the miner runs and get no fan curve of their own.";
+  } else $("holdHint").innerHTML = `<b>Target:</b> the temperature the hottest board is held at during the search (and for the
+          High preset). 60 °C is a good start. <b>Lowest fan:</b> the fans never go below this, even when the boards are cool.`;
+  if (hold && pre) {
+    const t = presetTemps({ fan_hold_c: num("f_fan_hold_c"), preset_max_c: num("f_preset_max_c"), abort_c: num("f_abort_c") });
+    $("presetTemps").innerHTML = `Each preset is held at its own temperature so the quieter ones get quieter fan curves:
+      <b>High ${t[0]} °C</b> · <b>Middle ${t[1]} °C</b> · <b>Low ${t[2]} °C</b> · <b>Lowest power ${t[3]} °C</b>
+      (spread from your target up to the warmest, and always at least 12 °C below the abort temperature).`;
+  }
+  $("fanFootnote").innerHTML = P ? (hold
+    ? "While this runs, the tuner controls this miner's fans; your other miners keep their own fan control. When it ends, the miner goes back to what it ran before and the dashboard's auto fan takes it back with the curve it had. Only one program should change a miner's clock, so don't run the tuner from a terminal on the same miner."
+    : "Fans are never changed, so auto fan control can stay on. Only one program should change a miner's clock, so don't run the tuner from a terminal on the same miner.")
+    : hold
+    ? "While this runs, the tuner controls this miner's fans; your other miners keep their own fan control. When it ends, the dashboard's auto fan takes this miner back (with the High preset's curve if presets were built). Only one program should change a miner's clock, so don't run the tuner from a terminal on the same miner."
+    : "Fans are never changed, so auto fan control can stay on. Only one program should change a miner's clock, so don't run the tuner from a terminal on the same miner.";
+  // number the visible sections 2, 3, 4...
+  let n = 2;
+  document.querySelectorAll("#formPanel .fsec").forEach((sec, i) => {
+    if (i === 0 || sec.classList.contains("hidden")) return;
+    const b = sec.querySelector(".num"); if (b) b.textContent = n++;
+  });
+  document.querySelector("#formPanel .fsec.confirm-only .hint").innerHTML =
+    `The time is split into rounds as long as one test (the <i>Minutes per test</i> in section ${document.querySelector(".sec-test").textContent}). Each round is judged like a search test. A round that fails gets one retest; if the retest fails too, the setting is REJECTED.`;
+}
+function timing() {
+  const b = num("f_baseline_min") || 25, h = num("f_hold_min") || 25;
+  const first = fans() === "hold" ? 5 : 3;
+  if (mode() === "presets") {
+    const pb = pbase() === "fresh" ? ((num("f_pbase_min") || 30) + first) / 60 : 0, p = ((num("f_ppreset_min") || 30) + first) / 60;
+    return { lo: pb + 4 * p, hi: pb + 9 * p };      // each preset once, up to about 9 tests with retries and fallbacks
+  }
+  if (mode() === "confirm") return { lo: (b + first) / 60 + (num("f_confirm_hours") || 4), hi: null };
+  // the curve: about 2 tests per clock (the start, then one below that fails), up to about 4 when a clock needs
+  // more voltage; failures usually end early. Plus the confirm.
+  const sp = num("f_step") || 25, n = Math.max(1, Math.ceil(((num("f_max_mhz") || 700) - (num("f_min_mhz") || 500)) / sp) + 1);
+  const conf = $("f_confirm").checked ? (num("f_confirm_min") || 2 * h) + 3 : 0;
+  let lo = (b + first + n * 1.4 * (h + 3) + conf) / 60, hi = (b + first + n * 2.6 * (h + 3) + conf) / 60;
+  if ($("f_presets").checked) {
+    const p = (num("f_preset_min") || 20) + (fans() === "hold" ? 5 : 3);
+    lo += 3 * p / 60; hi += 9 * p / 60;       // 3 presets (High reuses the confirm test), up to 3 tries each
+  }
+  return { lo, hi };
+}
+function estimate() {
+  const t = timing();
+  $("estimate").textContent = t.hi === null ? `about ${t.lo.toFixed(1)} hours`
+    : `roughly ${t.lo.toFixed(1)}–${t.hi.toFixed(1)} hours (failed steps end early)`;
+}
+function applyMode() {
+  const c = mode() === "confirm", P = mode() === "presets";
+  document.querySelectorAll(".search-only").forEach(e => e.classList.toggle("hidden", c || P));
+  document.querySelectorAll(".confirm-only").forEach(e => e.classList.toggle("hidden", !c));
+  document.querySelectorAll(".presets-mode").forEach(e => e.classList.toggle("hidden", !P));
+  document.querySelectorAll(".not-presets").forEach(e => e.classList.toggle("hidden", P));
+  if (P) loadSource();
+  syncOptions(); updatePv(); estimate();
+}
+document.querySelectorAll("#formPanel input, #formPanel select").forEach(i => {
+  i.addEventListener("input", () => { updatePv(); estimate(); });
+  i.addEventListener("change", applyMode);
+});
+
+// ---------- review ----------
+function collect() {
+  if (mode() === "presets") {
+    const b = { miner_id: $("viewMiner").value, mode: "presets", baseline: pbase(), sigma: num("f_sigma"), abort_c: num("f_abort_c"),
+      weak: $("f_weak").checked, any_model: $("f_any_model").checked, fans: fans(), preset_min: num("f_ppreset_min") };
+    if (b.baseline === "fresh") b.baseline_min = num("f_pbase_min");
+    if (b.fans === "hold") { b.fan_min = num("f_fan_min"); b.preset_temps = ptemps(); }
+    return b;
+  }
+  const body = { miner_id: $("viewMiner").value };
+  for (const k of OPTS) body[k] = num("f_" + k);
+  for (const k of ["boost","trim","confirm","weak"]) body[k] = $("f_" + k).checked;
+  body.mode = mode();
+  body.baseline = baseKind();
+  if (body.baseline === "current" && TL().current) { body.start_mhz = TL().current.mhz; body.mv = TL().current.mv; }
+  body.any_model = $("f_any_model").checked;
+  body.pv_offset = $("f_pv_offset").value.trim();
+  body.fans = fans();
+  if (body.fans === "hold") { body.fan_hold_c = num("f_fan_hold_c"); body.fan_min = num("f_fan_min"); }
+  body.presets = body.mode === "search" && $("f_presets").checked;
+  if (body.presets) { body.preset_min = num("f_preset_min"); if (body.fans === "hold") body.preset_max_c = num("f_preset_max_c"); }
+  body.min_mhz = body.mode === "search" && $("f_min_mhz").value.trim() !== "" ? num("f_min_mhz") : null;
+  body.confirm_min = body.mode === "search" && body.confirm && $("f_confirm_min").value.trim() !== "" ? num("f_confirm_min") : null;
+  if (body.mode === "confirm")
+    for (const k of ["confirm_mhz","confirm_mv","confirm_hours"]) body[k] = num("f_" + k);
+  return body;
+}
+function check(b) {
+  const bad = [], warn = [];
+  const range = (v, lo, hi, what) => { if (!(v >= lo && v <= hi)) bad.push(`${what} must be between ${lo} and ${hi} (now ${isNaN(v) ? "empty" : v}).`); };
+  if (b.mode === "presets") return checkPresets(b, bad, warn, range);
+  if (!b.miner_id) bad.push("Pick a miner (add one under Settings first).");
+  const hw = (HW[b.miner_id] || {}).hardware;
+  if (b.miner_id && !(hw && hw.ok)) bad.push("This miner hasn't been probed yet. Press Probe now in section 2, then review again.");
+  else if (hw && hw.profile !== "sc-lite" && !b.any_model)
+    bad.push(`This miner was detected as ${hw.name || hw.model || hw.profile}. The tuner is only tested on the SC Lite: tick "Allow miner models other than the SC Lite" to try anyway.`);
+  const TLm = TL(), LM = TLm.limits.mhz, LV = TLm.limits.mv, tested = TLm.defaults.max_mv;
+  const ADV = TLm.advised || TLm.limits;
+  // outside the usual range (but inside the hard one): a warning only, you can still start
+  const adv = (v, hard, usual, what, unit) => {
+    if (isNaN(v) || v < hard[0] || v > hard[1] || (v >= usual[0] && v <= usual[1])) return;
+    warn.push(`${what} ${v} ${unit} is outside the usual range for this miner (${usual[0]}–${usual[1]} ${unit}, worked out from its stock ${TLm.stock.mhz} MHz / ${TLm.stock.mv} mV). You can still start; watch the first steps closely.`);
+  };
+  if (TLm.source === "unsupported") bad.push(TLm.format_note.charAt(0).toUpperCase() + TLm.format_note.slice(1) + ".");
+  else if (TLm.source !== "firmware") bad.push("This miner's stock setting hasn't been read from its firmware yet. Press Probe now in section 2; the tuner's hard limits are worked out from it.");
+  const cur = TLm.current, sk = TLm.stock;
+  if (b.baseline === "current" && !cur) bad.push("The setting this miner runs now isn't known yet. Press Probe now in section 2, or pick another baseline.");
+  if (b.baseline === "custom") { range(b.start_mhz, LM[0], LM[1], "Baseline MHz"); range(b.mv, LV[0], LV[1], "Baseline mV"); }
+  if (cur && TLm.source === "firmware" && cur.mhz <= sk.mhz - 50) {
+    warn.push(`This miner runs ${cur.mhz} MHz now, ${sk.mhz - cur.mhz} MHz below its stock ${sk.mhz} MHz. It may have been turned down for a reason (a weak or damaged board).`
+      + (b.baseline === "stock" ? ` A stock baseline would run it at ${sk.mhz} MHz first; if it can't run that steadily, pick "What it runs now" in section 3.` : "")
+      + " If nothing is confirmed, it goes back to what it runs now.");
+  }
+  if (b.baseline !== "stock" && (b.start_mhz > sk.mhz || b.mv > sk.mv)) warn.push(`The baseline (${b.start_mhz} MHz / ${b.mv} mV) is above stock. The baseline should be a setting this miner is known to run cleanly.`);
+  if (b.mode === "search") {
+    adv(b.max_mhz, LM, ADV.mhz, "Highest MHz", "MHz");
+    adv(b.max_mv, LV, ADV.mv, "Highest mV", "mV");
+    adv(b.min_mv, LV, ADV.mv, "Lowest mV", "mV");
+    if (b.min_mhz != null) adv(b.min_mhz, LM, ADV.mhz, "Lowest MHz", "MHz");
+  } else { adv(b.confirm_mhz, LM, ADV.mhz, "MHz to confirm", "MHz"); adv(b.confirm_mv, LV, ADV.mv, "mV to confirm", "mV"); }
+  range(b.baseline_min, 5, 180, "Baseline minutes"); range(b.hold_min, 5, 180, "Minutes per test");
+  range(b.sigma, 1, 5, "Sensitivity"); range(b.abort_c, 60, 92, "Abort temperature");
+  if (b.pv_offset !== "" && !(+b.pv_offset >= -500 && +b.pv_offset <= 1000)) bad.push("PV offset must be between -500 and 1000, or empty for auto.");
+  if (b.mode === "search") {
+    range(b.max_mhz, LM[0], LM[1], "Highest MHz"); range(b.step, 5, 100, "MHz per step"); range(b.mv_step, 25, 300, "mV per step");
+    range(b.max_mv, LV[0], LV[1], "Highest mV"); range(b.min_mv, LV[0], LV[1], "Lowest mV");
+    if (b.min_mhz == null) bad.push("Set a Lowest MHz: the curve starts there.");
+    else {
+      range(b.min_mhz, LM[0], LM[1], "Lowest MHz");
+      if (b.min_mhz >= b.max_mhz) bad.push("Lowest MHz must be below Highest MHz.");
+      if (Math.abs(b.min_mhz / 12.5 - Math.round(b.min_mhz / 12.5)) > 1e-6) warn.push(`The miner sets clocks in 12.5 MHz steps, so ${b.min_mhz} MHz really runs at ${Math.floor(b.min_mhz / 12.5) * 12.5} MHz.`);
+    }
+    if (Math.abs(b.step / 12.5 - Math.round(b.step / 12.5)) > 1e-6) warn.push(`The miner sets clocks in 12.5 MHz steps; a ${b.step} MHz step means some clocks get rounded down. Use 25 (or 50).`);
+    if (b.max_mhz < b.start_mhz) warn.push("Highest MHz is below the baseline: the curve only covers clocks under it.");
+    if (b.min_mhz != null && b.min_mhz > b.start_mhz) warn.push("Lowest MHz is above the baseline: the curve only covers clocks over it.");
+    if (b.max_mv < b.mv) bad.push("Highest mV is below the baseline mV, so the lowest clock can't even start at the baseline voltage.");
+    if (b.min_mv > b.mv) bad.push("Lowest mV is above the baseline mV.");
+    if (b.max_mv > tested) warn.push(`Going up to ${b.max_mv} mV is more than 200 mV above this miner's stock ${TLm.stock.mv} mV. More voltage means more heat, power and chip wear.`);
+
+  } else {
+    range(b.confirm_mhz, LM[0], LM[1], "MHz to confirm"); range(b.confirm_mv, LV[0], LV[1], "mV to confirm"); range(b.confirm_hours, 0.5, 48, "Hours");
+    if (b.confirm_mhz <= b.start_mhz && b.confirm_mv === b.mv) warn.push("The setting to confirm is not above the baseline, so there is little to learn.");
+    if (b.confirm_mv > tested) warn.push(`${b.confirm_mv} mV is more than 200 mV above this miner's stock ${TLm.stock.mv} mV.`);
+  }
+  if (b.fans === "hold") {
+    range(b.fan_hold_c, 45, 80, "Target temperature"); range(b.fan_min, 20, 80, "Lowest fan %");
+    if (b.fan_hold_c > b.abort_c - 10) bad.push("The target temperature must be at least 10 °C below the abort temperature.");
+    if (b.fan_hold_c >= 72) warn.push(`Holding ${b.fan_hold_c} °C is warm: chips make more errors when hot, so the search will find a lower clock.`);
+  }
+  if (b.presets) {
+    range(b.preset_min, 5, 60, "Minutes per preset");
+    if (b.fans === "hold") {
+      range(b.preset_max_c, 45, 85, "Warmest preset temperature");
+      if (b.preset_max_c < b.fan_hold_c) bad.push("The warmest preset temperature can't be below the target temperature.");
+      if (b.preset_max_c > b.abort_c - 12) bad.push("The warmest preset temperature must be at least 12 °C below the abort temperature.");
+    }
+    if (b.preset_min < 15) warn.push(`${b.preset_min}-minute preset tests are short; 20 minutes is recommended.`);
+    if (!b.confirm) warn.push("Confirm the winner is off, so the High preset is tested separately (one more preset test).");
+  }
+  if (lastStatus && lastStatus.runs && Object.entries(lastStatus.runs).some(([k, r]) => r.running && k !== b.miner_id))
+    warn.push("Another miner is being tuned too. That's fine; each run only touches its own miner.");
+  if (b.hold_min < 20) warn.push(`${b.hold_min}-minute tests are short: a slightly weak chip may be missed. 25 to 30 minutes is recommended.`);
+  if (b.sigma < 2) warn.push(`Sensitivity ${b.sigma} is strict: expect some good settings to fail by chance.`);
+  if (b.any_model) warn.push("Untested models are allowed. If the miner isn't an SC Lite, watch the first steps closely.");
+  return { bad, warn };
+}
+function checkPresets(b, bad, warn, range) {
+  if (!b.miner_id) bad.push("Pick a miner (add one under Settings first).");
+  const hw = (HW[b.miner_id] || {}).hardware;
+  if (b.miner_id && !(hw && hw.ok)) bad.push("This miner hasn't been probed yet. Press Probe now in section 2, then review again.");
+  else if (hw && hw.profile !== "sc-lite" && !b.any_model)
+    bad.push(`This miner was detected as ${hw.name || hw.model || hw.profile}. The tuner is only tested on the SC Lite: tick "Allow miner models other than the SC Lite" to try anyway.`);
+  const src = SRC[b.miner_id];
+  if (!src) bad.push("Still reading the last search: wait a moment and review again.");
+  else if (!src.available) bad.push((src.why || "No search found.").replace(/^./, c => c.toUpperCase()) + (/\.$/.test(src.why || "") ? "" : "."));
+  range(b.sigma, 1, 5, "Sensitivity"); range(b.abort_c, 60, 92, "Abort temperature"); range(b.preset_min, 5, 60, "Minutes per preset");
+  if (b.baseline === "fresh") range(b.baseline_min, 5, 180, "Baseline minutes");
+  if (b.fans === "hold") {
+    range(b.fan_min, 20, 80, "Lowest fan %");
+    const names = ["High", "Middle", "Low", "Lowest power"];
+    b.preset_temps.forEach((t, i) => range(t, 45, b.abort_c - 10, `${names[i]} temperature`));
+    if (src && src.available && src.hold_c && b.preset_temps.some(t => t > src.hold_c + 8))
+      warn.push(`Some presets are more than 8 °C warmer than the ${src.hold_c} °C the curve was measured at: expect them to need more voltage or a lower clock.`);
+    if (b.preset_temps.some((t, i) => i && t < b.preset_temps[i - 1]))
+      warn.push("The temperatures usually go up from High to Lowest power (quieter presets run warmer); yours don't. That's allowed.");
+  }
+  if (src && src.available && b.baseline === "reuse") {
+    const days = (Date.now() - new Date(src.base_when.replace(" ", "T")).getTime()) / 86400000;
+    if (days > 3) warn.push(`The search's baseline is ${Math.round(days)} days old. Chips' normal error rates drift; a fresh baseline is safer.`);
+  }
+  if (b.preset_min < 20) warn.push(`${b.preset_min}-minute preset tests are short; 20 to 30 minutes is recommended.`);
+  if (b.sigma < 2) warn.push(`Sensitivity ${b.sigma} is strict: expect some good presets to fail by chance.`);
+  if (lastStatus && lastStatus.runs && Object.entries(lastStatus.runs).some(([k, r]) => r.running && k !== b.miner_id))
+    warn.push("Another miner is being tuned too. That's fine; each run only touches its own miner.");
+  return { bad, warn };
+}
+function planHtmlPresets(b) {
+  const m = [...$("viewMiner").options].find(o => o.value === b.miner_id);
+  const src = SRC[b.miner_id] || {}, t = timing(), hold = b.fans === "hold";
+  const T = b.preset_temps || [], base = src.baseline || {};
+  const steps = [];
+  steps.push(b.baseline === "fresh"
+    ? `<b>Baseline:</b> ${base.mhz} MHz · ${base.mv} mV · PV ${base.pv} (the search's baseline) for ${b.baseline_min} min${hold ? `, held at ${src.hold_c || T[0]} °C` : ""} (plus ${hold ? 5 : 3} min to settle). Learns every chip's normal error rate today. Nothing can fail here.`
+    : `<b>Baseline:</b> none: every chip is judged against the normal rate ${esc(src.label)} measured on ${esc(src.base_when)}.`);
+  steps.push(`<b>Presets:</b> High (${src.best ? `${src.best[0]} MHz · ${src.best[1]} mV` : "the search's best"}), then Middle, Low and Lowest power (from the curve, the same way a search builds them),
+    ${b.preset_min} min each${hold ? `, held at ${T[0]}, ${T[1]}, ${T[2]} and ${T[3]} °C` : ""}. A close call is retested once; a preset that still fails gets one voltage step more, then one clock step less, up to 3 tries.
+    ${hold ? "Each passing preset gets a fan curve built from the fan it needed." : "Presets get no fan curve of their own (fans are left alone)."}`);
+  steps.push(`<b>Result:</b> the four presets replace this miner's tuner presets on <a href="/profiles.html?miner=${encodeURIComponent(b.miner_id)}">Profiles</a> (your own presets stay).
+    The miner goes back to what it ran before the run. If a tuner preset was on, it shows as "no preset" afterwards (the miner still runs the old numbers): apply the preset again, or let the schedule do it at its next change.`);
+  return `<dl class="kvline">
+      <dt>Miner</dt><dd>${esc(m ? m.textContent : b.miner_id)}${b.any_model ? " (untested models allowed)" : " (SC Lite only)"}</dd>
+      <dt>Option</dt><dd>Rebuild the presets from ${esc(src.label || "the last search")}</dd>
+      <dt>Fans</dt><dd>${hold ? `held per preset, never below ${b.fan_min} %` : "left alone"}</dd>
+      <dt>Time</dt><dd>roughly ${t.lo.toFixed(1)}–${t.hi.toFixed(1)} hours (failed steps end early)</dd>
+    </dl>
+    <ol class="plan">${steps.map(x => `<li>${x}</li>`).join("")}</ol>
+    <p class="hint"><b>Pass or fail</b> works exactly as in a search (sensitivity ${b.sigma}${b.weak ? "; chips already noisy at the baseline only fail when they get clearly worse" : ""}).
+      <b>Safety:</b> the run stops and the miner goes back to what it ran before if a board reaches ${b.abort_c} °C. <b>Stop</b> at any time does the same; presets already tested are kept.</p>`;
+}
+function planHtml(b) {
+  if (b.mode === "presets") return planHtmlPresets(b);
+  const m = [...$("viewMiner").options].find(o => o.value === b.miner_id);
+  const pv = (mv) => esc(pvText(mv));
+  const h = b.hold_min, t = timing();
+  const steps = [];
+  steps.push(`<b>Baseline${b.baseline === "stock" ? " (stock)" : b.baseline === "current" ? " (what it runs now)" : " (yours)"}:</b> ${b.start_mhz} MHz · ${b.mv} mV · ${pv(b.mv)} for ${b.baseline_min} min (plus ${b.fans === "hold" ? 5 : 3} min to settle).
+    Learns every chip's normal error rate. Nothing can fail here.`);
+  if (b.mode === "search") {
+    const lowC = Math.floor((b.min_mhz ?? b.start_mhz) / b.step) * b.step;
+    const nC = Math.max(0, Math.ceil((b.max_mhz - lowC) / b.step) + 1);
+    const offTop = (b.max_mhz - lowC) % b.step !== 0;
+    steps.push(`<b>Voltage curve:</b> ${nC} clocks, from ${lowC} up to ${b.max_mhz} MHz in ${b.step} MHz steps${offTop ? ` (the last step is shorter, to land on ${b.max_mhz})` : ""}, ${h} min per test.
+      ${lowC} MHz starts at the baseline ${b.mv} mV; every higher clock starts at the voltage that was lowest one clock slower (plus one step if the clock before needed more).
+      If a clock isn't clean there it gets +${b.mv_step} mV at a time (up to ${b.max_mv} mV)${b.trim ? `; then its voltage is lowered
+      ${b.mv_step} mV at a time until it fails (down to ${b.min_mv} mV; it stops after two failures in a row, or one at a voltage a slower
+      clock failed at too)` : " (voltages are never lowered: \"Find the lowest voltage\" is off)"}. Every voltage is tested at its own clock.
+      A failed test is retested once unless it went over its whole limit in under half the test. The curve ends at the first clock
+      that isn't clean at ${b.max_mv} mV; the fastest clean clock is the best setting.`);
+    if (b.confirm) steps.push(`<b>Confirm:</b> runs the best setting once more, for ${b.confirm_min || 2 * h} min. A close call gets one retest; if it still fails, the next-best passing setting is confirmed instead.`);
+    if (b.presets) {
+      const t = b.fans === "hold" ? presetTemps(b) : null;
+      steps.push(`<b>Presets:</b> tests Middle, Low and Lowest power for ${b.preset_min} min each${t ? `, held at ${t[1]}, ${t[2]} and ${t[3]} °C` : ""};
+        Lowest power runs at ${b.min_mhz} MHz and Middle and Low are spread evenly between High and it, each at the curve's voltage for its clock
+        (High ${b.confirm ? "reuses the confirm test" : `is tested too${t ? ` at ${t[0]} °C` : ""}`}). A preset that fails a close call is retested once; one that still fails gets more voltage, then a lower clock (at that clock's measured voltage), up to 3 tries.
+        ${t ? "Each passing preset gets a fan curve built from the fan it needed." : "Presets get no fan curve of their own (fans are left alone)."}`);
+    }
+    steps.push(`<b>Result:</b> the miner is left on the ${b.confirm ? "confirmed " : ""}best setting${b.presets ? " (the High preset)" : ""}, or, if nothing is confirmed, back on what it ran before the run.`);
+  } else {
+    const rounds = Math.max(1, Math.round(b.confirm_hours * 60 / h));
+    steps.push(`<b>Confirm:</b> runs ${b.confirm_mhz} MHz · ${b.confirm_mv} mV · ${pv(b.confirm_mv)} for ${b.confirm_hours} h
+      as ${rounds} round${rounds > 1 ? "s" : ""} of ${h} min. A failed round gets one retest; a second failure ends the run.`);
+    steps.push(`<b>Result:</b> CONFIRMED leaves the miner on ${b.confirm_mhz} MHz · ${b.confirm_mv} mV. REJECTED puts back what it ran before the run.`);
+  }
+  return `<dl class="kvline">
+      <dt>Miner</dt><dd>${esc(m ? m.textContent : b.miner_id)}${b.any_model ? " (untested models allowed)" : " (SC Lite only)"}</dd>
+      <dt>Detected as</dt><dd>${esc((HW[b.miner_id] || {}).line || "not probed")}</dd>
+      <dt>Option</dt><dd>${b.mode === "search" ? "Map every clock and voltage" : "Confirm one setting"}</dd>
+      <dt>Fans</dt><dd>${b.fans === "hold" ? `held at ${b.fan_hold_c} °C, never below ${b.fan_min} %` : "left alone"}</dd>
+      ${b.mode === "search" ? `<dt>Presets</dt><dd>${b.presets ? "built and tested at the end" : "not built"}</dd>` : ""}
+      <dt>Time</dt><dd>${t.hi === null ? `about ${t.lo.toFixed(1)} hours` : `roughly ${t.lo.toFixed(1)}–${t.hi.toFixed(1)} hours (failed steps end early)`}</dd>
+    </dl>
+    <ol class="plan">${steps.map(x => `<li>${x}</li>`).join("")}</ol>
+    <p class="hint"><b>Pass or fail:</b> a test fails when any chip (or a whole board) makes clearly more errors than
+      its own normal rate from the baseline, more than chance would explain: errors are random, so each chip's limit is set
+      from its own normal rate, and since all the chips are checked, a good setting fails by luck only about
+      ${b.sigma >= 2.5 ? (b.sigma >= 3 ? "1 test in 100" : "1 test in 20") : (b.sigma >= 2 ? "1 test in 5" : "1 test in 3 or more")}
+      (sensitivity ${b.sigma}; higher clocks are allowed proportionally more, since they do more work), or when a board resets. Bad settings fail early.${b.weak ? " Chips already noisy at the baseline only fail when they get clearly worse." : ""}
+      A clean test still fails if its hashrate is more than 4% below what the clock should give (the baseline's hashrate
+      scaled by the clock), so a setting that quietly loses work never wins. Before each test is judged, the tuner checks
+      the miner really took the setting.
+      <b>Safety:</b> the run stops and the miner goes back to what it ran before if a board reaches ${b.abort_c} °C, or if a board resets during the baseline. If the miner's web
+      interface drops out, it waits up to 5 minutes before giving up. <b>Stop</b> at any time puts
+      back what the miner ran before the run (or the confirmed best, if the confirm already passed).
+      ${b.fans === "hold" ? "Fans: the tuner holds the temperature and goes to full fan if a board gets 8 °C over the target; when it ends, auto fan takes over again." : "Fans are not touched."}</p>`;
+}
+$("btnReview").onclick = () => {
+  const b = collect(), c = check(b);
+  $("reviewBody").innerHTML =
+    c.bad.map(x => `<div class="note bad">✕ ${esc(x)}</div>`).join("") +
+    c.warn.map(x => `<div class="note warn">▲ ${esc(x)}</div>`).join("") +
+    planHtml(b);
+  $("btnStart").disabled = c.bad.length > 0;
+  $("btnStart").textContent = c.bad.length ? "Fix the items above first" : "Start tuner";
+  $("formPanel").classList.add("hidden"); $("reviewPanel").classList.remove("hidden");
+  $("reviewPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+$("btnBack").onclick = () => {
+  $("reviewPanel").classList.add("hidden"); $("formPanel").classList.remove("hidden");
+  $("formPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+// Current step chart: one bar per chip (the chips closest to failing), showing its new errors
+// as a share of its own limit. The red line is the limit: a chip whose bar goes above it fails the step.
+let liveDoc = null, liveAt = 0;
+window.addEventListener("resize", () => { clearTimeout(drawChart._r); drawChart._r = setTimeout(() => drawChart(), 150); });
+async function loadLive() {
+  if (Date.now() - liveAt < 4000) return drawChart();
+  liveAt = Date.now();
+  try { liveDoc = await api("GET", "/api/tuner/chipmap?miner=" + encodeURIComponent(viewId)); } catch (e) { /* keep */ }
+  drawChart();
+}
+function drawChart() {
+  const svg = $("chart"), d = liveDoc;
+  const W = Math.max(300, Math.round(svg.getBoundingClientRect().width) || 600), H = 190;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.style.height = H + "px";
+  const msg = (t) => { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" style="fill:var(--muted)" font-size="13">${esc(t)}</text>`; $("chartNote").textContent = ""; };
+  if (!d || !(d.chips || []).length) return msg("waiting for the first reading…");
+  if (!d.judged) return msg("baseline: nothing can fail here, it's learning each chip's normal error rate");
+  const rows = d.chips.filter(c => c[3] != null).map(c => ({ b: c[0], c: c[1], n: c[2], lim: +c[3], rate: c[4], r: c[3] > 0 ? c[2] / c[3] : 0 }));
+  const hit = rows.filter(x => x.n > 0).sort((a, b) => b.r - a.r || b.n - a.n);
+  if (!hit.length) return msg(`no new errors on any chip yet (${rows.length} chips watched)`);
+  const N = W < 420 ? 6 : W < 520 ? 8 : W < 900 ? 12 : 16, show = hit.slice(0, N);
+  const L = 40, R = 10, T = 14, B = 34;
+  const top = Math.max(1.25, Math.ceil(Math.max(...show.map(x => x.r)) * 4 + 0.5) / 4);   // always show the line with room above
+  const Y = (v) => T + (1 - v / top) * (H - T - B);
+  const slot = (W - L - R) / N, bw = Math.min(46, slot * 0.62);
+  let h = "";
+  for (const v of [0, 0.25, 0.5, 0.75]) h += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" style="stroke:var(--line)"/>` +
+    `<text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" font-size="11" style="fill:var(--muted)">${v * 100}%</text>`;
+  show.forEach((x, i) => {
+    const cx = L + slot * i + slot / 2, y = Y(Math.min(x.r, top)), over = x.n > x.lim;
+    const fill = over ? "var(--bad)" : "var(--text)", op = over ? 1 : x.r >= 0.75 ? 0.95 : 0.55;
+    const tip = `board ${x.b} chip ${x.c}: ${x.n} new error${x.n === 1 ? "" : "s"} of a limit of ${x.lim.toFixed(1)} (${Math.round(x.r * 100)}%)` +
+      (x.rate != null ? ` · normally ${(+x.rate).toFixed(1)} per hour` : "") + (over ? " · over the limit: this step fails" : "");
+    h += `<g><title>${esc(tip)}</title><rect x="${cx - bw / 2}" y="${y}" width="${bw}" height="${Math.max(1, Y(0) - y)}" rx="3" style="fill:${fill}" opacity="${op}"/>` +
+      `<text x="${cx}" y="${y - 4}" text-anchor="middle" font-size="11" font-family="var(--mono)" style="fill:var(--text)">${x.n}/${x.lim.toFixed(x.lim < 10 ? 1 : 0)}</text>` +
+      `<text x="${cx}" y="${H - 18}" text-anchor="middle" font-size="10.5" font-family="var(--mono)" style="fill:var(--muted)">b${x.b}c${x.c}</text></g>`;
+  });
+  // the limit: above this line a chip fails the step
+  h += `<line x1="${L}" x2="${W - R}" y1="${Y(1)}" y2="${Y(1)}" style="stroke:var(--bad)" stroke-width="2"/>` +
+       `<text x="${L - 6}" y="${Y(1) + 4}" text-anchor="end" font-size="11" font-weight="700" style="fill:var(--bad)">limit</text>`;
+  h += `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" style="stroke:var(--muted)"/>`;
+  h += `<text x="${L}" y="${H - 3}" font-size="10.5" style="fill:var(--muted)">${hit.length > N ? `the ${N} chips closest to their limit (of ${hit.length} with new errors)` : `every chip with new errors (${hit.length} of ${rows.length})`}</text>`;
+  svg.innerHTML = h;
+  const w = hit[0];
+  $("chartNote").textContent = w.n > w.lim ? `${chipLabel("b" + w.b + "c" + w.c)} is over its limit`
+    : `closest: board ${w.b} chip ${w.c} at ${Math.round(w.r * 100)}% (${w.n} of ${w.lim.toFixed(1)})`;
+}
+
+function renderRuns(s) {
+  const runs = s.runs || {};
+  const names = {}; [...$("viewMiner").options].forEach(o => names[o.value] = o.textContent.replace(/ \(.*$/, ""));
+  const ids = Object.keys(runs).filter(k => runs[k].running);
+  $("runPills").innerHTML = ids.length
+    ? "Tuning now: " + ids.map(k => `<span class="pill ok runpill ${k === viewId ? "on" : ""}" data-m="${esc(k)}">${esc(names[k] || runs[k].name || k)}</span>`).join(" ")
+    : `<span class="muted" style="font-size:.85rem">No miner is being tuned right now.</span>`;
+  $("runPills").querySelectorAll("[data-m]").forEach(el => el.onclick = () => pickMiner(el.dataset.m));
+}
+function pickMiner(id) {
+  if (!id || id === viewId) return;
+  viewId = id; $("viewMiner").value = id;
+  history.replaceState(null, "", "?miner=" + encodeURIComponent(id));
+  formFilled = false; mapSel = "live"; mapData = null; liveDoc = null; liveAt = 0; srcFor = "";
+  ["f_pt0", "f_pt1", "f_pt2", "f_pt3"].forEach(k => $(k).value = "");
+  showHw();
+  $("reviewPanel").classList.add("hidden");
+  refresh();
+}
+$("viewMiner").onchange = () => pickMiner($("viewMiner").value);
+document.addEventListener("click", (e) => {     // downloads go to the miner shown on the page
+  const a = e.target.closest && e.target.closest("a.dl"); if (!a) return;
+  if (!viewId) { e.preventDefault(); toast("Pick a miner first", true); return; }
+  a.href = `/api/tuner/download?miner=${encodeURIComponent(viewId)}&what=${a.dataset.what}`;
+});
+const PHASE = { baseline: "Baseline (learning normal error rates)", test: "Current test",
+  "preset high": "Preset test: High", "preset middle": "Preset test: Middle", "preset low": "Preset test: Low", "preset lowest": "Preset test: Lowest power" };
+function renderPresetsBox(s) {
+  const p = s.presets && s.presets.presets;
+  if (!p || !Object.keys(p).length) return "";
+  const order = ["high", "middle", "low", "lowest"];
+  return `<div class="preset-list">` + order.filter(k => p[k]).map(k => { const e = p[k];
+    return `<div><b>${esc(e.label)} ${e.ok ? '<span class="pill ok">passed</span>' : '<span class="pill bad">failed</span>'}</b>
+      <span class="mono">${e.mhz} MHz · ${e.mv} mV · PV ${e.pv}</span><br>
+      <span class="muted">${e.ok ? `${e.target_c != null ? `${e.target_c} °C · ` : ""}${e.avg_fan != null ? `fans ${e.avg_fan} % · ` : ""}${e.avg_ths ? (+e.avg_ths).toFixed(2) + " TH/s" : ""}` : esc(e.reason || "")}</span></div>`; }).join("")
+    + `</div><p class="hint">${s.presets.complete ? (s.running ? "Presets done." : `Saved to this miner: see <a href="/profiles.html?miner=${encodeURIComponent(s.miner_id)}">Profiles</a>.`) : "Still building presets…"}</p>`;
+}
+
+const RP_IC = { pass: "✓", fail: "✗", run: "●", todo: "–", skip: "⤼", stop: "■" };
+const RP_WORD = { pass: "done", fail: "failed", run: "running now", todo: "not done yet", skip: "skipped", stop: "cut short" };
+function rpParams(o, p) {
+  if (!o) return "";
+  if (o.mode === "presets") {
+    const rows = [["Option", `Rebuild the presets from ${o.source || "the last search"}`],
+      ["Baseline", o.baseline === "reuse" ? `reused from ${o.source_when || "the search"}` : `${o.start_mhz} MHz · ${o.mv} mV · ${o.baseline_min} min`],
+      ["High", o.high ? `${o.high.mhz} MHz · ${o.high.mv} mV` : "—"],
+      ["Presets", `${o.preset_min} min each` + (o.preset_temps ? ` · ${o.preset_temps.join(" / ")} °C` : "")],
+      ["Fans", o.fans === "hold" ? `held per preset · never below ${o.fan_min}%` : "left alone"],
+      ["Tests", `sensitivity ${o.sigma}${o.weak === false ? "" : " · easier on noisy chips"}`],
+      ["Safety", `stops at ${o.abort_c} °C`]];
+    if (p && p.started) rows.push(["Started", p.started.replace("T", " ").slice(0, 16)]);
+    return rows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+  }
+  const pv = o.pv_offset != null && o.pv_offset !== "" ? `PV = mV ${o.pv_offset >= 0 ? "+" : "−"} ${Math.abs(o.pv_offset)}`
+    : o.pv_auto != null ? `PV = mV ${o.pv_auto >= 0 ? "+" : "−"} ${Math.abs(o.pv_auto)} (stock gap)` : "PV auto (miner's gap)";
+  const rows = [["Option", o.mode === "confirm" ? "Confirm one setting" : "Map every clock and voltage"],
+    ["Baseline", `${o.start_mhz} MHz · ${o.mv} mV · ${o.baseline_min} min${o.baseline === "current" ? " (what it ran)" : o.baseline === "custom" ? " (yours)" : ""}`], ["PV", pv],
+    ...(o.before ? [["Before the run", `${o.before.mhz} MHz · ${o.before.mv} mV (where it goes back to if nothing is confirmed)`]] : [])];
+  if (o.mode === "confirm") rows.push(["Confirm", `${o.confirm_mhz} MHz · ${o.confirm_mv} mV for ${o.confirm_hours} h`]);
+  else {
+    rows.push(["Clocks", `${o.min_mhz ? o.min_mhz + "–" : "up "}to ${o.max_mhz} MHz in ${o.step} MHz steps`]);
+    rows.push(["Voltage", `${o.min_mv}–${o.max_mv} mV in ${o.mv_step} mV steps` + (o.trim ? "" : " (only raised)")]);
+  }
+  rows.push(["Tests", `${o.hold_min} min each · sensitivity ${o.sigma}${o.weak === false ? "" : " · easier on noisy chips"}`]);
+  rows.push(["Fans", o.fans === "hold" ? `hold ${o.fan_hold_c} °C · never below ${o.fan_min}%` : "left alone"]);
+  if (o.mode !== "confirm") rows.push(["Presets", o.presets ? `${o.preset_min} min each${(o.min_mhz || o.preset_min_mhz) ? ` · Lowest at ${o.min_mhz || o.preset_min_mhz} MHz` : ""}${o.fans === "hold" ? ` · up to ${o.preset_max_c} °C` : ""}` : "off"]);
+  rows.push(["Safety", `stops at ${o.abort_c} °C`]);
+  if (p && p.started) rows.push(["Started", p.started.replace("T", " ").slice(0, 16)]);
+  return rows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+}
+function rpAttempts(it) {
+  return (it.attempts || []).map(a => {
+    const what = `${a.mv} mV${a.label && a.label !== "test" ? ` (${a.label})` : ""}`;
+    const why = a.state === "pass" ? "" : a.state === "run" ? " · running now" : a.why ? ` · ${a.why}` : "";
+    return `<span class="st-${a.state}" title="${esc(`${a.mhz} MHz · ${a.mv} mV · PV ${a.pv}: ${RP_WORD[a.state] || a.state}${a.why ? " — " + a.why : ""}`)}">${RP_IC[a.state] || ""}</span> <b>${esc(what)}</b>${esc(why)}`;
+  }).join(" &nbsp;→&nbsp; ") || (it.note ? esc(it.note) : it.detail ? esc(it.detail) : "");
+}
+function renderPlan(s) {
+  const p = s.plan, panel = $("planPanel");
+  if (!p || !(p.stages || []).length) { panel.classList.add("hidden"); return; }
+  panel.classList.remove("hidden");
+  const running = !!s.running;
+  const oc = { done: ["finished", "ok"], stopped: ["stopped", ""], aborted: ["safety stop", "bad"], error: ["error", "bad"] }[p.outcome] || ["finished", ""];
+  $("planState").textContent = running ? "running" : oc[0];
+  $("planState").className = "pill " + (running ? "warn" : oc[1]);
+  $("planParams").innerHTML = rpParams((s.info || {}).options, p);
+  const done = p.stages.filter(x => ["pass", "fail", "skip", "stop"].includes(x.state)).length;
+  $("planSteps").innerHTML = p.stages.map(st => {
+    const items = (st.items || []).map(it => `<div class="rp-item"><span class="ic st-${it.state}" title="${esc(RP_WORD[it.state] || "")}">${RP_IC[it.state] || ""}</span>
+        <span class="lbl">${esc(it.label)}</span><span class="att">${rpAttempts(it) || (it.state === "todo" ? "not done yet" : "")}</span></div>`).join("");
+    return `<li class="rp-step ${st.state === "run" ? "now" : ""}"><span class="ic st-${st.state}" title="${esc(RP_WORD[st.state] || "")}">${RP_IC[st.state] || ""}</span>
+      <div><div class="t">${esc(st.title)}<small>${esc(RP_WORD[st.state] || "")}</small></div>
+        <div class="d">${esc(st.detail || "")}</div>${st.note ? `<div class="n">${esc(st.note)}</div>` : ""}</div>
+      ${items ? `<div class="rp-items">${items}</div>` : ""}</li>`;
+  }).join("");
+  $("planSteps").setAttribute("aria-label", `${done} of ${p.stages.length} steps finished`);
+}
+
+function render(s) {
+  lastStatus = s;
+  if (!viewId && s.miner_id) { viewId = s.miner_id; if ([...$("viewMiner").options].some(o => o.value === viewId)) $("viewMiner").value = viewId; }
+  if (s.miner_id && viewId && s.miner_id !== viewId) return;   // an older reply for another miner
+  if (!viewId) viewId = $("viewMiner").value;
+  $("fMinerName").textContent = minerName();
+  showHw();
+  renderRuns(s);
+  const running = s.running;
+  $("statePill").textContent = running ? "running" : "stopped";
+  $("statePill").className = "pill " + (running ? "ok" : "");
+  $("btnStop").classList.toggle("hidden", !running);
+  if (running) { $("formPanel").classList.add("hidden"); $("reviewPanel").classList.add("hidden"); }
+  else if ($("reviewPanel").classList.contains("hidden")) $("formPanel").classList.remove("hidden");
+  $("btnReview").disabled = !s.script_found;
+  if (!s.script_found) toast(`asic_tuner.py not found in ${s.folder}`, true);
+  $("folder").textContent = `Tuner files: ${s.folder}`;
+  fillForm(s.defaults, s.info);
+  renderPlan(s);
+
+  // current step
+  const step = s.step || [];
+  const last = step[step.length - 1];
+  if (last && running) {
+    $("curEmpty").classList.add("hidden"); $("curBody").classList.remove("hidden");
+    const hold = +last.hold_min || 25, el = +last.elapsed_min || 0;
+    $("curTitle").textContent = PHASE[last.phase] || "Current test";
+    $("curPlan").textContent = `${last.mhz} MHz · ${last.mv} mV · PV ${last.pv}`;
+    $("curPhase").textContent = last.phase;
+    $("curBar").style.width = Math.min(100, el / hold * 100) + "%";
+    $("curProgress").textContent = `${el.toFixed(1)} / ${hold} min`;
+    $("kvHash").textContent = `${(+last.total_ths).toFixed(2)} TH/s`;
+    $("kvTemp").textContent = `${last.max_temp} °C` + (last.fan ? `  ·  fan ${last.fan} % → ${last.target_c} °C` : "");
+    $("kvAll").textContent = `+${last.all_chips_new}` + (+last.board_resets ? `  ·  ${last.board_resets} reset(s)` : "");
+    const lim = +last.worst_chip_limit;
+    if (last.phase === "baseline" || !lim) {
+      $("kvChip").textContent = `${chipLabel(last.worst_chip)}: +${last.worst_chip_new}`;
+      $("curVerdict").textContent = "learning"; $("curVerdict").className = "pill";
+    } else {
+      const n = +last.worst_chip_new;
+      $("kvChip").textContent = `${chipLabel(last.worst_chip)}: +${n} of ${lim.toFixed(1)}`;
+      const v = n > lim ? ["over limit", "bad"] : n >= 0.6 * lim ? ["close", "warn"] : ["clean so far", "ok"];
+      $("curVerdict").textContent = v[0]; $("curVerdict").className = "pill " + v[1];
+    }
+    loadLive();
+  } else {
+    $("curBody").classList.add("hidden"); $("curEmpty").classList.remove("hidden");
+    $("curTitle").textContent = "Current step";
+    $("curEmpty").textContent = running ? "Starting… the first reading appears a few minutes after each step begins (up to about 5 while the fans settle)."
+      : (s.finished_line ? `Finished. ${s.finished_line}` : "Not running. Start a run below.");
+  }
+
+  // best
+  if (s.best) {
+    const b = s.best;
+    $("bestBody").innerHTML = `<span class="big" style="color:var(--ok)">${esc(b.mhz)} MHz · ${esc(b.mv)} mV · PV ${esc(b.pv)}</span>
+      <span class="pill ${s.best_confirmed ? "ok" : "warn"}" style="margin-left:.6rem">${s.best_confirmed ? "confirmed" : "not confirmed yet"}</span>
+      <span class="muted" style="margin-left:.6rem">${b.avg_ths ? (+b.avg_ths).toFixed(2) + " TH/s" : ""}</span>` + renderPresetsBox(s);
+  } else $("bestBody").innerHTML = (((s.info || {}).options || {}).mode === "presets"
+      ? `<span class="muted">Rebuilding the presets from ${esc(s.info.options.source || "the last search")} (the curve isn't searched again).</span>`
+      : "No passing setting yet.") + renderPresetsBox(s);
+
+  // results
+  const rows = (s.results || []).slice().reverse();
+  const pm = (HW[viewId] || {}).power_model;
+  const estW = (mhz, pv) => {
+    if (!pm || !mhz || !pv) return null;
+    const eff = Math.floor(mhz / 12.5) * 12.5;
+    return pm.rated_w * pm.cal * (0.07 + 0.93 * (eff / pm.mhz) * Math.pow(pv / pm.pv, 2));
+  };
+  $("resBody").innerHTML = rows.length ? rows.map(r => {
+    const cls = (r.result.startsWith("PASS") || r.result === "CONFIRMED") ? "res-pass" : r.result === "BASELINE" ? "res-base" : "res-fail";
+    return `<tr class="pick" data-key='${esc(testKey(r))}' title="Show this test on the chip map"><td class="mono">${esc(r.time.replace("T", " ").slice(5, 16))}</td><td class="num">${esc(r.mhz)}</td>
+      <td class="num">${esc(r.mv)}</td><td class="num">${esc(r.pv)}</td><td class="${cls}">${esc(r.result)}</td>
+      <td class="num">${r.avg_ths ? (+r.avg_ths).toFixed(2) : "—"}</td>${(() => { const w = estW(+r.mhz, +r.pv);
+        return `<td class="num">${w ? Math.round(w) : "—"}</td><td class="num">${w && +r.avg_ths > 0.05 ? Math.round(w / r.avg_ths) : "—"}</td>`; })()}<td class="num">${r.max_temp ? (+r.max_temp).toFixed(1) : "—"}</td><td>${esc(r.reason)}</td></tr>`;
+  }).join("") : `<tr><td colspan="10" class="muted">None yet.</td></tr>`;
+  $("failChips").innerHTML = (s.fail_chips || []).length
+    ? "Chips that failed tests: " + s.fail_chips.map(([k, n]) => `<span class="pill bad">${esc(chipLabel(k))} ×${n}</span>`).join(" ")
+    : "";
+  $("log").textContent = (s.log || []).join("\n");
+  fillMapSel(s.results || []);
+  markPicked();
+  if (mapSel === "live" || !mapData) loadMap();
+}
+
+// ---------------- chip map ----------------
+// Grey ramp from the theme (dark: dim -> white, light: pale -> black); red + x = over.
+const RAMP = [0, 1, 2, 3, 4, 5].map(i => `var(--ramp-${i})`);
+let mapSel = "live", mapData = null, runResults = [];
+
+function bin(r) { return Math.min(RAMP.length - 1, Math.max(0, Math.ceil(r * RAMP.length) - 1)); }
+
+function renderMap(d) {
+  mapData = d;
+  const chips = (d && d.chips) || [];
+  const map = $("map");
+  if (!chips.length) {
+    map.innerHTML = ""; $("mapLegend").innerHTML = ""; $("mapTable").innerHTML = "";
+    $("mapCaption").textContent = mapSel === "live" ? "Waiting for the first reading of this step…" : "No chip data saved for that test.";
+    return;
+  }
+  const judged = d.judged;
+  const maxNew = Math.max(1, ...chips.map(c => c[2]));
+  const ratio = (c) => judged ? (c[3] ? c[2] / c[3] : 0) : c[2] / maxNew;
+  const boards = {};
+  for (const c of chips) (boards[c[0]] ||= []).push(c);
+
+  const plan = `${d.mhz} MHz · ${d.mv} mV`;
+  $("mapCaption").textContent = judged
+    ? `${mapSel === "live" ? "Live" : "Test"} ${plan}, ${(+d.elapsed_min).toFixed(1)} min watched. Each square is a chip; the stronger the shade, the closer it is to its own limit.`
+    : `Baseline ${plan}: learning each chip's normal error rate. Stronger shade = more errors so far; nothing can fail here.`;
+
+  let html = "";
+  for (const b of Object.keys(boards).sort((x, y) => x - y)) {
+    const list = boards[b].sort((x, y) => x[1] - y[1]);
+    const tot = list.reduce((a, c) => a + c[2], 0);
+    const over = judged ? list.filter(c => c[3] && c[2] > c[3]).length : 0;
+    const cols = list.length % 2 ? list.length + 1 : list.length;   // even, so narrow screens split it in two rows
+    html += `<div class="board-row"><div class="board-label">Board ${b}<span class="muted">+${tot} errors${over ? ` · ${over} over` : ""}</span></div><div class="cells" style="--cols:${cols};--half:${cols / 2}">`;
+    for (const c of list) {
+      const r = ratio(c), isOver = judged && c[3] && c[2] > c[3];
+      let style = "", cls = "cell", txt = "";
+      if (isOver) { cls += " over"; txt = "×"; }
+      else if (c[2] > 0) {
+        const i = bin(r); style = `background:${RAMP[i]}`;
+        if (i >= 3) cls += " strong";
+        if (r >= 0.6) txt = c[2];               // label only the chips worth reading
+      }
+      const lbl = `Board ${c[0]} chip ${c[1]}: ${c[2]} new errors` + (judged && c[3] ? `, limit ${c[3]}` : "");
+      html += `<div class="${cls}" style="${style}" data-k="${c[0]},${c[1]}" aria-label="${lbl}">${txt}</div>`;
+    }
+    html += `</div></div>`;
+  }
+  map.innerHTML = html;
+
+  const sw = RAMP.map(h => `<span class="sw" style="background:${h}"></span>`).join("");
+  $("mapLegend").innerHTML =
+    `<span><span class="sw" style="background:var(--cell-empty);box-shadow:inset 0 0 0 1px var(--cell-edge)"></span> no new errors</span>` +
+    `<span>few<span class="ramp">${sw}</span>${judged ? "at its limit" : "most"}</span>` +
+    (judged ? `<span><span class="sw" style="background:var(--over)">×</span> over its limit (fails the test)</span>` : "");
+
+  const rows = chips.filter(c => c[2] > 0).sort((a, b) => ratio(b) - ratio(a)).slice(0, 25);
+  $("mapTable").innerHTML = rows.length ? rows.map(c => `<tr><td>${c[0]}</td><td class="num">${c[1]}</td><td class="num">${c[2]}</td>
+      <td class="num">${c[3] ?? "—"}</td><td class="num">${judged && c[3] ? Math.round(c[2] / c[3] * 100) + "%" : "—"}</td>
+      <td class="num">${(+c[4]).toFixed(1)}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">No chip has new errors yet.</td></tr>`;
+}
+
+function chipTip(el, x, y) {
+  const tip = $("chipTip");
+  if (!el || !mapData) { tip.style.display = "none"; return; }
+  const [b, n] = el.dataset.k.split(",").map(Number);
+  const c = mapData.chips.find(c => c[0] === b && c[1] === n);
+  if (!c) return;
+  const lim = mapData.judged && c[3] ? `<br>limit <b>${c[3]}</b> (${Math.round(c[2] / c[3] * 100)}%)` : "";
+  const state = mapData.judged && c[3] ? (c[2] > c[3] ? "<br><span style='color:var(--bad)'>✕ over its limit</span>"
+    : c[2] >= 0.6 * c[3] ? "<br><span style='color:var(--warn)'>▲ close to its limit</span>" : "") : "";
+  tip.innerHTML = `Board ${b} · chip ${n}<br><b>+${c[2]}</b> new errors${lim}<br>normal ${(+c[4]).toFixed(1)}/hour${state}`;
+  tip.style.display = "block";
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  tip.style.left = Math.min(window.innerWidth - w - 8, x + 14) + "px";
+  tip.style.top = (y + h + 20 > window.innerHeight ? y - h - 12 : y + 14) + "px";
+}
+$("map").addEventListener("mousemove", e => chipTip(e.target.closest(".cell"), e.clientX, e.clientY));
+$("map").addEventListener("mouseleave", () => chipTip(null));
+$("map").addEventListener("click", e => {
+  const el = e.target.closest(".cell");
+  document.querySelectorAll(".cell.sel").forEach(x => x.classList.remove("sel"));
+  if (el) { el.classList.add("sel"); chipTip(el, e.clientX, e.clientY); }
+});
+
+function testKey(r) { return JSON.stringify({ t: r.time, mhz: r.mhz, mv: r.mv, r: r.result }); }
+function fillMapSel(results) {
+  runResults = results;
+  const sel = $("mapSel"), keep = mapSel;
+  const opts = [`<option value="live">Live: current step</option>`].concat(results.slice().reverse().map(r =>
+    `<option value='${esc(testKey(r))}'>${esc(r.time.slice(11, 16))}  ${esc(r.mhz)} MHz ${esc(r.mv)} mV: ${esc(r.result)}</option>`));
+  const html = opts.join("");
+  if (sel._html !== html) { sel.innerHTML = html; sel._html = html; }
+  sel.value = [...sel.options].some(o => o.value === keep) ? keep : "live";
+  mapSel = sel.value;
+}
+async function loadMap() {
+  try {
+    const q = mapSel === "live" ? "" : "?" + new URLSearchParams(JSON.parse(mapSel)).toString();
+    const sep = q ? "&" : "?";
+    renderMap(await api("GET", "/api/tuner/chipmap" + q + sep + "miner=" + encodeURIComponent(viewId)));
+  } catch (e) { /* keep the last map */ }
+}
+$("mapSel").onchange = () => { mapSel = $("mapSel").value; loadMap(); markPicked(); };
+function markPicked() {
+  document.querySelectorAll("#resBody tr.pick").forEach(tr => tr.classList.toggle("on", tr.dataset.key === mapSel));
+}
+$("resBody").addEventListener("click", e => {
+  const tr = e.target.closest("tr.pick"); if (!tr) return;
+  mapSel = tr.dataset.key; $("mapSel").value = mapSel; loadMap(); markPicked();
+  $("mapPanel").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+async function refresh() {
+  try { render(await api("GET", "/api/tuner/status" + (viewId ? "?miner=" + encodeURIComponent(viewId) : ""))); }
+  catch (e) { $("statePill").textContent = "no connection"; $("statePill").className = "pill bad"; }
+}
+
+$("btnStart").onclick = async () => {
+  const body = collect();
+  if (check(body).bad.length) return;
+  $("btnStart").disabled = true;
+  try {
+    await api("POST", "/api/tuner/start", body);
+    toast(`Tuner started on ${minerName()}`);
+    $("reviewPanel").classList.add("hidden");
+  } catch (e) { toast(e.message, true); }
+  finally { $("btnStart").disabled = false; refresh(); }
+};
+$("btnStop").onclick = async () => {
+  if (!confirm(`Stop the tuning run on ${minerName()}? It will put the best setting found so far back on that miner.`)) return;
+  try { const j = await api("POST", "/api/tuner/stop", { miner_id: viewId }); toast(j.message); }
+  catch (e) { toast(e.message, true); }
+  refresh();
+};
+
+document.addEventListener("themechange", () => { if (mapData) renderMap(mapData); refresh(); });
+$("btnProbe").onclick = async () => {
+  $("btnProbe").disabled = true; $("hwLine").textContent = "probing… (up to about 30 s)";
+  let ok = false;
+  try { const j = await api("POST", "/api/hardware/probe", { miner_id: viewId }); ok = j.hardware.ok; toast(ok ? "Probed: " + j.line : "Probe failed: " + j.line, !ok); }
+  catch (e) { toast(e.message, true); }
+  finally { $("btnProbe").disabled = false; await loadHw(); if (ok && !(lastStatus && lastStatus.running)) useStock(false); }
+};
+loadMiners().then(loadHw).then(refresh);
+setInterval(loadHw, 20000);
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

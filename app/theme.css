@@ -1,0 +1,167 @@
+/* Blake2b ASIC Control: monochrome theme.
+   Black background, white text, greys for everything else. Only states keep colour:
+   green = good / passed, yellow = close / warning, red = failed / danger.
+   Loaded after style.css on every page, so it only overrides. */
+
+:root {
+  color-scheme: dark;     /* native checkboxes, selects and scrollbars in dark too */
+  --bg: #000000;
+  --panel: #0e0e0e;
+  --panel2: #1a1a1a;
+  --border: #2c2c2c;
+  --text: #f4f4f4;
+  --muted: #a0a0a0;
+  --accent: #ffffff;       /* was teal: now the "selected / primary" highlight */
+  --accent2: #d6d6d6;
+  /* state colours stay as they were */
+  --ok: #3dd68c;
+  --warn: #f0b429;
+  --bad: #ff6b6b;
+}
+
+html, body { background: var(--bg); color: var(--text); }
+a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+header.app { background: rgba(0, 0, 0, 0.88); border-bottom-color: var(--border); }
+header.app h1 { color: var(--muted); }
+header.app .brand { color: var(--text); }
+
+button, input, select, textarea { background: var(--panel2); border-color: var(--border); color: var(--text); }
+button { background: #161616; }
+button:hover:not(:disabled) { filter: none; background: #222; border-color: #444; }
+button.primary { background: var(--text); color: #000; border-color: var(--text); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: #d9d9d9; border-color: #d9d9d9; }
+button.danger { background: #2a0e0e; border-color: #6e2626; color: #ffb3b3; }
+button.danger:hover:not(:disabled) { background: #3a1414; border-color: #8a3030; }
+.tabs button.active, .hdr-right button.active, button.active {
+  background: var(--text); color: #000; border-color: var(--text);
+}
+input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+input[type=checkbox], input[type=radio], input[type=range] { accent-color: #f4f4f4; }
+
+.panel, .card { background: var(--panel); border-color: var(--border); }
+.kv div { background: var(--panel2); }
+th { color: var(--muted); }
+th, td { border-bottom-color: var(--line); }
+.card.selected { outline-color: var(--text); }
+.toast { background: #141414; border-color: var(--border); }
+.toast.err { border-color: #6e2626; }
+
+/* state pills keep their colour */
+.pill { border-color: var(--border); color: var(--muted); }
+.pill.ok { color: var(--ok); border-color: #1f5a3c; background: #0c2016; }
+.pill.warn { color: var(--warn); border-color: #5a4a1f; background: #221b09; }
+.pill.bad { color: var(--bad); border-color: #5a2323; background: #220c0c; }
+
+/* chip-map grey scale (validated on the dark panel): dim = few errors, white = at the limit */
+:root {
+  --ramp-0: #5a5a5a; --ramp-1: #7a7a7a; --ramp-2: #9a9a9a;
+  --ramp-3: #b8b8b8; --ramp-4: #d6d6d6; --ramp-5: #f4f4f4;
+  --over: #d03b3b;
+  --line: var(--border);   /* thin dividers: table rows, section separators */
+  --hover: #222222;
+  --sel-bg: #1f1f1f;
+  --tip-bg: #141414;
+  --cell-empty: #161616;   /* chip with no new errors */
+  --cell-edge: #444444;    /* thin outline on every chip square */
+}
+
+.theme-btn { min-width: 5.6rem; }
+
+/* ---------------------------------------------------------------- light mode ---
+   The reverse: white background, black text. Same rule for colour: only states. */
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --panel: #f6f6f6;
+  --panel2: #ececec;
+  --border: #8f8f8f;      /* outlines of panels, cards, inputs, buttons: ~3.2:1 on white */
+  --line: #c4c4c4;        /* lighter for table rows */
+  --text: #0a0a0a;
+  --muted: #555555;
+  --accent: #0a0a0a;
+  --accent2: #2c2c2c;
+  --ok: #0a7a3d;
+  --warn: #9a6700;
+  --bad: #c62828;
+  /* chip-map grey scale (validated on the light panel): light = few errors, black = at the limit */
+  --ramp-0: #9e9e9e; --ramp-1: #808080; --ramp-2: #626262;
+  --ramp-3: #474747; --ramp-4: #2c2c2c; --ramp-5: #0a0a0a;
+  --hover: #e2e2e2;
+  --sel-bg: #e4e4e4;
+  --tip-bg: #ffffff;
+  --cell-empty: #ffffff;
+  --cell-edge: #969696;
+  color-scheme: light;
+}
+:root[data-theme="light"] header.app { background: rgba(255, 255, 255, 0.9); }
+/* the reading tiles (Fleet cards, Miner page Live): a clearly darker grey on the light card, like the dark
+   theme's lighter tiles on black */
+:root[data-theme="light"] .kv div { background: #e0e0e0; }
+:root[data-theme="light"] .kv .label { color: #474747; }
+:root[data-theme="light"] button { background: #f1f1f1; color: var(--text); }
+:root[data-theme="light"] button:hover:not(:disabled) { background: #e4e4e4; border-color: #6e6e6e; }
+:root[data-theme="light"] button.primary { background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+:root[data-theme="light"] button.primary:hover:not(:disabled) { background: #333; border-color: #333; }
+:root[data-theme="light"] button.danger { background: #fdeaea; border-color: #e3a1a1; color: #b42318; }
+:root[data-theme="light"] button.danger:hover:not(:disabled) { background: #fad4d4; border-color: #d98080; }
+:root[data-theme="light"] .tabs button.active,
+:root[data-theme="light"] .hdr-right button.active,
+:root[data-theme="light"] button.active { background: #0a0a0a; color: #fff; border-color: #0a0a0a; }
+:root[data-theme="light"] input:focus, :root[data-theme="light"] select:focus,
+:root[data-theme="light"] textarea:focus, :root[data-theme="light"] button:focus-visible { outline-color: #000; }
+:root[data-theme="light"] input[type=checkbox], :root[data-theme="light"] input[type=radio],
+:root[data-theme="light"] input[type=range] { accent-color: #0a0a0a; }
+:root[data-theme="light"] .toast { background: #ffffff; box-shadow: 0 10px 40px rgba(0,0,0,.15); }
+:root[data-theme="light"] .pill.ok { border-color: #9fd4b4; background: #e8f6ee; }
+:root[data-theme="light"] .pill.warn { border-color: #e2c98a; background: #fbf3de; }
+:root[data-theme="light"] .pill.bad { border-color: #e3a1a1; background: #fdeaea; }
+/* Tuner page pieces with their own shades */
+:root[data-theme="light"] .fsec { border-top-color: #9e9e9e; }   /* Tuner section dividers: ~2.7:1 on white */
+:root[data-theme="light"] header.app { border-bottom-color: var(--border); }
+:root[data-theme="light"] .pill { border-color: #b3b3b3; }
+:root[data-theme="light"] .mode-card.on { background: #ffffff; }
+:root[data-theme="light"] .note.bad { border-color: #e3a1a1; background: #fdeaea; }
+:root[data-theme="light"] .note.warn { border-color: #e2c98a; background: #fbf3de; }
+:root[data-theme="light"] .tag.search, :root[data-theme="light"] .tag.confirm { border-color: #999; }
+:root[data-theme="light"] .chip-tip { box-shadow: 0 8px 28px rgba(0,0,0,.18); border-color: #bbb; }
+
+/* the tab row wraps on narrow screens instead of running off the edge */
+.tabs { flex-wrap: wrap; }
+
+/* ---------- phones and narrow windows ---------- */
+.split > * { min-width: 0; }                      /* a wide table scrolls inside its panel instead of widening the page */
+.footer-note, .mono { overflow-wrap: anywhere; }
+.cells, .cell { min-width: 0; }
+@media (max-width: 640px) {
+  /* header: two short rows. 1: name, theme, Settings, Account. 2: the page tabs (they scroll sideways if
+     they don't fit). The pages refresh by themselves, so their Refresh / auto / status bits are left out. */
+  header.app { padding: .5rem .75rem; gap: .4rem; flex-wrap: wrap; }
+  header.app h1 { font-size: .9rem; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; order: 0; }
+  header.app .spacer { display: none; }
+  header.app .hdr-right, header.app .hdr-right > .row { display: contents; }
+  header.app .hdr-right > .row:first-child > * { order: 2; }
+  header.app .hdr-right > .row:last-child > *:not(.theme-btn) { display: none; }
+  header.app .hdr-right .theme-btn { order: 1; min-width: 0; }
+  header.app .theme-btn .tl { display: none; }
+  header.app .tabs { order: 5; flex: 1 0 100%; min-width: 0; flex-wrap: nowrap; overflow-x: auto; gap: .3rem;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  header.app .tabs::-webkit-scrollbar { display: none; }
+  header.app .tabs button { flex: 1 0 auto; }
+  header.app button { padding: .3rem .55rem; font-size: .8rem; border-radius: 8px; flex: 0 0 auto; }
+  /* content */
+  main { padding: .75rem; }
+  .panel { padding: .8rem .8rem; }
+  .panel h2 { font-size: 1rem; }
+  input, select, textarea { font-size: 16px; }    /* stops iPhones zooming in on a field */
+  .row { gap: .4rem; }
+  .row > input:not([type=checkbox]):not([type=radio]), .row > select { min-width: 0; max-width: 100%; }
+  table { font-size: .82rem; }
+  .toast { left: .75rem; right: .75rem; max-width: none; }
+  /* the dashboard's own tables (Pools, Boards) scroll sideways instead of squeezing long URLs */
+  #viewDetail .panel > table, #viewDetail .panel > div > table { display: block; overflow-x: auto; white-space: nowrap; }
+  /* fan slider: the value keeps its width, the button drops below when there's no room */
+  .slider-row { flex-wrap: wrap; }
+  .slider-row input[type=range] { flex: 1 1 6rem; min-width: 0; }
+  .slider-row .mono { min-width: 2.2ch; text-align: right; }
+  .slider-row button.primary { flex: 1 0 100%; }
+}

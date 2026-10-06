@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Schedule · Blake2b ASIC Control</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
+  <style>
+    .hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: .4rem; }
+    @media (max-width: 640px) { .hdr-right { align-items: flex-start; } }
+    .intro { font-size: .88rem; margin: -.2rem 0 .7rem; max-width: 72rem; line-height: 1.5; }
+    .hint { color: var(--muted); font-size: .8rem; margin: .35rem 0 .5rem; line-height: 1.45; max-width: 72rem; }
+    .note { border-radius: 10px; padding: .55rem .75rem; font-size: .85rem; margin: .5rem 0; border: 1px solid var(--border); }
+    .note.bad { color: var(--bad); border-color: #5a2323; background: #220c0c; }
+    .note.warn { color: var(--warn); border-color: #5a4a1f; background: #221b09; }
+    :root[data-theme="light"] .note.bad { border-color: #e3a1a1; background: #fdeaea; }
+    :root[data-theme="light"] .note.warn { border-color: #e2c98a; background: #fbf3de; }
+    .minerbar { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+    .minerbar select { min-width: 14rem; }
+    .big { font: 600 1.15rem/1.3 var(--mono); }
+    .switch { display: inline-flex; gap: .45rem; align-items: center; font-size: .95rem; cursor: pointer; }
+    .switch input { width: 1.1rem; height: 1.1rem; }
+    /* week */
+    .brushes { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: .2rem 0 .7rem; }
+    .brush { display: inline-flex; align-items: center; gap: .45rem; padding: .35rem .6rem; }
+    .brush i { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--cell-edge); }
+    .brush small { color: var(--muted); font-family: var(--mono); font-size: .72rem; }
+    .brush.on { background: var(--sel-bg) !important; border-color: var(--text) !important; box-shadow: 0 0 0 1px var(--text) inset; color: var(--text) !important; }
+    .grid-wrap { overflow-x: auto; padding: 4px 4px 6px; }   /* room for the hover / "now" outline on the edge blocks (scrolling clips anything outside) */
+    .wk { display: grid; grid-template-columns: 3rem 1fr; gap: 4px .6rem; align-items: center; min-width: 560px; }
+    .wk .day { font-size: .8rem; color: var(--muted); }
+    .wk .day.today { color: var(--text); font-weight: 700; }
+    .blocks { display: grid; grid-template-columns: repeat(48, 1fr); gap: 2px; touch-action: none; user-select: none; }
+    .blk { height: 26px; border-radius: 3px; background: var(--cell-empty); box-shadow: inset 0 0 0 1px var(--cell-edge);
+           cursor: crosshair; display: flex; align-items: center; justify-content: center; font: 600 .56rem/1 var(--mono); color: var(--text); }
+    .blk.strong { color: var(--bg); }
+    .blk.hr { margin-left: 2px; }                 /* a little gap on each whole hour */
+    .blk.now { outline: 2px solid var(--ok); outline-offset: 1px; z-index: 1; }
+    .blk { position: relative; }
+    .blk.rs { box-shadow: inset 0 0 0 2px var(--text); }
+
+    .baserow { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin: -.3rem 0 .7rem; }
+    .blk.rs::after { content: "↻"; position: absolute; top: -3px; right: 0; font: 700 .72rem/1 var(--mono); color: var(--text);
+                     text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg), 0 0 3px var(--bg); }
+    .brush.rsb i { background: transparent !important; box-shadow: none; color: var(--text); font-style: normal; font-weight: 700; text-align: center; line-height: 16px; width: auto; min-width: 16px; }
+    .rsrow { display: flex; flex-wrap: wrap; gap: .5rem .8rem; align-items: center; }
+    .rsrow select { min-width: 13rem; }
+    .rsrow input[type=time] { width: 9rem; font-family: var(--mono); }
+    .rsrow input[type=number] { width: 5rem; }
+    .blk:hover { outline: 2px solid var(--text); outline-offset: 1px; z-index: 2; }
+    .hrs { display: grid; grid-template-columns: repeat(48, 1fr); gap: 2px; font-size: .64rem; color: var(--muted); font-family: var(--mono); }
+    .hrs span { grid-column: span 6; }
+    @media (max-width: 700px) {
+      .wk { min-width: 0; grid-template-columns: 2.4rem 1fr; }
+      .blocks, .hrs { grid-template-columns: repeat(24, 1fr); }
+      .hrs span { grid-column: span 6; }
+      .hrs .pm { display: none; }
+      .blk { height: 20px; }
+    }
+    .phone-only { display: none; }
+    @media (max-width: 700px) { .phone-only { display: block; } }
+    .keyrow { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .78rem; color: var(--muted); margin-top: .6rem; }
+    .keyrow i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: .3rem;
+                box-shadow: inset 0 0 0 1px var(--cell-edge); }
+    .tip { position: fixed; z-index: 60; pointer-events: none; background: var(--tip-bg, var(--panel)); border: 1px solid var(--border);
+           border-radius: 10px; padding: .4rem .6rem; font-size: .8rem; display: none; box-shadow: 0 8px 28px rgba(0,0,0,.4); }
+    /* rules */
+    .rules { display: flex; flex-direction: column; gap: .45rem; margin-top: .4rem; }
+    .rule { display: flex; flex-wrap: wrap; gap: .45rem .7rem; align-items: center; padding: .5rem .6rem; border: 1px solid var(--border);
+            border-radius: 10px; background: var(--panel2); }
+    .rule .lbl { font-size: .8rem; color: var(--muted); }
+    .rule input[type=time] { width: 9rem; font-family: var(--mono); }
+    .days { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+    @media (max-width: 640px) { .days button { min-width: 2.3rem; padding: .25rem .3rem; } }
+    .days button { padding: .25rem .45rem; font-size: .78rem; min-width: 2.6rem; }
+    .days button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .rule select { min-width: 11rem; }
+    .errs { color: var(--bad); font-size: .85rem; margin: .4rem 0; }
+    .copylist { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin: .4rem 0; }
+    .copylist label { display: inline-flex; gap: .35rem; align-items: center; font-size: .88rem; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <h1><span class="brand">Blake2b</span> ASIC Control</h1>
+    <div class="tabs">
+      <button type="button" onclick="location.href='/#fleet'">Fleet</button>
+      <button type="button" onclick="location.href='/#pools'">Pools</button>
+      <button type="button" onclick="location.href='/profiles.html'">Profiles</button>
+      <button type="button" class="active">Schedule</button>
+      <button type="button" onclick="location.href='/tuner.html'">Tuner</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="hdr-right">
+      <div class="row">
+        <button type="button" onclick="location.href='/#settings'">Settings</button>
+      </div>
+      <div class="row">
+        <button type="button" class="theme-btn" data-theme-toggle>☀ Light</button>
+        <button type="button" id="btnRefresh">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel compact">
+      <div class="minerbar">
+        <label class="muted">Miner <select id="minerSel"></select></label>
+        <label class="switch"><input type="checkbox" id="schOn" /> Schedule on</label>
+        <span class="pill" id="statePill">—</span>
+      </div>
+      <div style="margin-top:.7rem">
+        <div class="big" id="nowLine">—</div>
+        <div class="muted" id="nextLine" style="font-size:.88rem;margin-top:.2rem">—</div>
+      </div>
+      <div id="notes"></div>
+      <p class="hint">Each miner has its own schedule. It switches between that miner's presets (the High / Middle /
+        Low / Lowest power the tuner built, or your own from Profiles). Each change puts on the preset's clock,
+        voltage, PV and fan curve once; a preset you apply by hand in between stays on until the next scheduled change.
+        Times are the app's local time (<span id="tz">—</span>).</p>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">This week</h2>
+        <span class="muted" style="font-size:.8rem">each block = 30 minutes</span>
+      </div>
+      <p class="muted intro" style="margin-top:.4rem">Pick a preset, then click a block to paint it, or hold and drag to
+        paint several (drag down to cover several days). The blocks you don't paint follow <b>The rest of the time</b>
+        under the brushes: nothing (after a painted stretch the miner goes back to what it ran before), or a preset
+        (shown lighter). <b>↻ Restart</b> marks a restart at the start of a block (click a mark again, or use
+        <b>⌫ Erase</b>, to remove it). Each block is half an hour. Nothing changes on the miner until you press
+        <b>Save schedule</b>.</p>
+      <div class="brushes" id="brushes"></div>
+      <div class="baserow" id="baseRow"></div>
+      <p class="muted phone-only" style="font-size:.78rem;margin:0 0 .4rem">On a phone each day takes two lines:
+        00:00–12:00 on the first, 12:00–24:00 on the second.</p>
+      <div class="grid-wrap">
+        <div class="wk" id="week"></div>
+      </div>
+      <div class="keyrow" id="key"></div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Restarts</h2>
+        <span class="pill" id="rsPill">off</span>
+      </div>
+      <p class="muted intro" style="margin-top:.4rem">Restart this miner's mining software on a schedule (the same as its
+        Restart button: hashing stops for a minute or two). Mark restarts on the week above with <b>↻ Restart</b>, pick a
+        repeat here, or both. It's separate from the preset changes and works even without presets. A restart that comes
+        due while the miner is being tuned is skipped. Every restart shows as <b>↻</b> (a ringed block) on the week.</p>
+      <div class="rsrow">
+        <label class="muted">Repeat <select id="rsEvery"></select></label>
+        <label class="muted rs-at">at <input type="time" step="60" id="rsAt" value="04:00" /></label>
+        <label class="muted rs-day">on <select id="rsDay"></select></label>
+        <label class="muted rs-mday">on day <input type="number" id="rsMday" min="1" max="28" value="1" /> of the month</label>
+      </div>
+      <p class="hint" id="rsMarksLine"></p>
+      <div id="rsCost"></div>
+      <div class="muted" id="rsNext" style="font-size:.88rem;margin-top:.5rem">—</div>
+      <div class="row" style="margin-top:.7rem">
+        <button type="button" class="primary" id="btnSave2">Save schedule</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Changes</h2>
+        <span class="pill" id="dirtyPill">saved</span>
+      </div>
+      <p class="muted intro">Each line is "at this time, on these days, switch to this preset". The preset stays on until
+        the next line comes round (it carries over midnight and into the next day).</p>
+      <div class="row" style="gap:.4rem;margin-bottom:.3rem">
+        <span class="muted" style="font-size:.85rem">Start from</span>
+        <button type="button" data-tpl="nights">Quiet nights</button>
+        <button type="button" data-tpl="tariff">Cheaper night power</button>
+        <button type="button" data-tpl="weekend">Quieter weekends</button>
+      </div>
+      <div class="rules" id="rules"></div>
+      <div class="row" style="margin-top:.6rem"><button type="button" id="btnAdd">+ Add a change</button></div>
+      <div class="errs" id="err"></div>
+      <div class="row" style="margin-top:.7rem">
+        <button type="button" class="primary" id="btnSave">Save schedule</button>
+        <button type="button" id="btnUndo">Undo changes</button>
+        <button type="button" class="danger" id="btnClear">Clear preset changes</button>
+      </div>
+    </section>
+
+    <section class="panel compact">
+      <h2>Copy to other miners</h2>
+      <p class="hint" style="margin-top:0">Copies these times and days, and the scheduled restart. Each miner then uses its <i>own</i> presets of the
+        same name (its own tuned clocks and fan curves). A miner that is missing one of the presets is skipped.</p>
+      <div class="copylist" id="copyList"></div>
+      <button type="button" id="btnCopy">Copy the saved schedule</button>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+  <div class="tip" id="tip"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast show" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.className = "toast", 5000);
+}
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { location.href = "/login.html?next=/schedule.html"; throw new Error("not signed in"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const SHADE = { high: 5, middle: 3, low: 1, lowest: 0 };   // spread out so neighbours are easy to tell apart
+let S = null, minerId = new URLSearchParams(location.search).get("miner") || "";
+let rules = [], saved = "", enabled = false;
+let rs = { every: "off" };     // scheduled restart (working copy)
+const EVERY = [["off", "Off"], ["hour", "Every hour"], ["6h", "Every 6 hours"], ["12h", "Every 12 hours"], ["day", "Every day"],
+  ["week", "Every week"], ["month", "Every month"], ["3months", "Every 3 months"]];
+const RS_BRUSH = "__restart";
+const miner = () => (S && S.miners.find(m => m.id === minerId)) || null;
+const hm = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
+const fmtD = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const fmt = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+function shadeOf(key) {
+  if (key in SHADE) return SHADE[key];
+  const others = Object.keys((miner() || {}).presets || {}).filter(k => !(k in SHADE)).sort();
+  return [4, 2][others.indexOf(key) % 2] ?? 4;
+}
+const labelOf = (key) => key === BACK ? "nothing (back to what it ran before)" : (((miner() || {}).presets || {})[key] || {}).label || key;
+function okPresets() { return Object.entries((miner() || {}).presets || {}).filter(([, p]) => p.ok !== false); }
+
+// preset in force at a minute of the week, from the working rules
+function occ(rs) {
+  const o = [];
+  rs.forEach((r, i) => { if (!/^\d{2}:\d{2}$/.test(r.start || "")) return; (r.days || []).forEach(d => o.push([d * 1440 + hm(r.start), i])); });
+  return o.sort((a, b) => a[0] - b[0]);
+}
+function atMinute(o, mow) {
+  if (!o.length) return null;
+  let cur = o[o.length - 1];
+  for (const x of o) if (x[0] <= mow) cur = x;
+  return cur[1];
+}
+
+let brush = null;
+const ERASE = "__erase";
+const BACK = "__back";     // the rest of the time: nothing scheduled (back to what it ran before a painted stretch)
+let base = null;   // the preset the unpainted blocks run ("the rest of the time")
+const SLOT = 30, NSLOT = 48;
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+function gridFromRules(rs) {
+  const o = occ(rs), g = [];
+  for (let d = 0; d < 7; d++) { g.push([]); for (let k = 0; k < NSLOT; k++) { const i = atMinute(o, d * 1440 + k * SLOT); g[d].push(i == null ? null : rs[i].preset); } }
+  return g;
+}
+function rulesFromGrid(g) {
+  // unpainted blocks run the "rest of the time" preset; a change wherever a block differs from the one before
+  // it (the week wraps round)
+  const flat = g.flat().map(x => x == null ? base : x), n = flat.length, ch = [];
+  if (flat.every(x => x == null || x === BACK)) return [];
+  if (flat.every(x => x === flat[0])) return [{ start: "00:00", days: [0], preset: flat[0] }];
+  for (let w = 0; w < n; w++) {
+    const prev = flat[(w - 1 + n) % n];
+    if (flat[w] != null && flat[w] !== prev) ch.push({ d: Math.floor(w / NSLOT), m: (w % NSLOT) * SLOT, p: flat[w] });
+  }
+  const groups = {};
+  ch.forEach(c => { const k = c.m + "|" + c.p; (groups[k] = groups[k] || { m: c.m, p: c.p, days: [] }).days.push(c.d); });
+  return Object.values(groups).sort((x, y) => x.m - y.m)
+    .map(x => ({ start: hhmm(x.m), days: x.days.sort(), preset: x.p }));
+}
+function short1(key) {
+  const l = labelOf(key) || key; const w = l.split(/\s+/);
+  return (w.length > 1 ? w.map(x => x[0]).join("") : l.slice(0, 2)).toUpperCase().slice(0, 2);
+}
+function short(key) {      // two letters, different for every preset (Low and Lowest: LO and LT)
+  const keys = okPresets().map(([k]) => k), mine = short1(key);
+  if (keys.filter(k => k !== key && short1(k) === mine).length === 0) return mine;
+  const l = (labelOf(key) || key).replace(/\s+/g, "");
+  const alt = (l[0] + l[l.length - 1]).toUpperCase();
+  return keys.indexOf(key) === keys.findIndex(k => short1(k) === mine) ? mine : alt;
+}
+function defaultBase(except) {
+  return BACK;     // a new schedule: only what you paint changes anything
+  const ps = okPresets().map(([k]) => k);
+  return ["high", "middle", "low", "lowest"].find(k => ps.includes(k) && k !== except) || ps.find(k => k !== except) || ps[0] || null;
+}
+function renderBrushes() {
+  const ps = okPresets();
+  if (brush !== RS_BRUSH && brush !== ERASE && !ps.some(([k]) => k === brush)) brush = ps.length ? ps[0][0] : RS_BRUSH;
+  let h = `<span class="muted" style="font-size:.85rem">Paint with</span>` + ps.map(([k, p]) => `
+      <button type="button" class="brush ${k === brush ? "on" : ""}" data-k="${esc(k)}"><i style="background:var(--ramp-${shadeOf(k)})"></i>
+        ${esc(p.label)} <small>${p.idle ? "not hashing" : p.mhz ? `${p.mhz} MHz · ${p.mv} mV` : ""}</small></button>`).join("");
+  h += `<button type="button" class="brush rsb ${brush === RS_BRUSH ? "on" : ""}" data-k="${RS_BRUSH}"
+      title="Click a block to restart at its start, or drag to mark several (at least an hour apart); click a mark again to remove it"><i>↻</i> Restart</button>`;
+  h += `<button type="button" class="brush rsb ${brush === ERASE ? "on" : ""}" data-k="${ERASE}"
+      title="Click or drag to clear blocks: painted presets go back to the rest-of-the-time preset, and restart marks are removed"><i>⌫</i> Erase</button>`;
+  h += `<button type="button" id="btnFill" title="Fill every block of the week with what's picked">Fill the whole week</button>`;
+  if (!ps.length) h += `<span class="muted" style="font-size:.85rem">(no presets yet: only restarts can be scheduled)</span>`;
+  $("brushes").innerHTML = h;
+  $("baseRow").innerHTML = ps.length ? `<span class="muted" style="font-size:.85rem">The rest of the time</span>
+      <select id="baseSel"><option value="${BACK}" ${base === BACK || !base ? "selected" : ""}>nothing: back to what it ran before</option>
+        ${ps.map(([k, p]) => `<option value="${esc(k)}" ${k === base ? "selected" : ""}>runs ${esc(p.label)}</option>`).join("")}</select>
+      <span class="muted" style="font-size:.8rem">${base && base !== BACK ? "(the unpainted blocks, shown lighter)"
+        : "(unpainted blocks change nothing: after a painted stretch the miner goes back to the preset or clock it was on before it)"}</span>` : "";
+  if ($("baseSel")) {
+    if (!base) $("baseSel").value = BACK;
+    $("baseSel").onchange = () => {
+      const old = base, g = gridFromRules(rules).map(r => r.map(x => x === old ? null : x));   // what was "the rest" follows
+      base = $("baseSel").value; if (rules.length) rules = rulesFromGrid(g); changed(true);
+    };
+  }
+  $("brushes").querySelectorAll(".brush").forEach(b => b.onclick = () => { brush = b.dataset.k; renderBrushes(); });
+  $("btnFill").onclick = fillWeek;
+}
+function fillWeek() {
+  if (brush === RS_BRUSH) {
+    const hourly = []; for (let h = 0; h < 7 * 24; h++) hourly.push(h * 60);
+    const per = hourly.length, sec = ((miner() || {}).restart_s || 75) + 60;
+    if (!confirm(`Mark a restart every hour of the week (${per} a week)?\n\nEach restart stops hashing for about ${sec - 60} s plus a minute or so to get back to full speed: about ${(per * sec / (7 * 86400) * 100).toFixed(0)}% less mining, and the best share since restart starts again every hour. Once a day or once a week is plenty for keeping a miner fresh.`)) return;
+    rs.marks = hourly; changed(); return;
+  }
+  if (brush === ERASE) {
+    if (!confirm("Clear the whole week: every painted preset and every marked restart?")) return;
+    rules = []; rs.marks = []; changed(true); return;
+  }
+  if (!brush) return;
+  rules = [{ start: "00:00", days: [0], preset: brush }]; changed(true);
+}
+// scheduled restarts in this week: {day: {block: ["HH:MM", ...]}} (same rules as the server)
+function restartsThisWeek() {
+  const out = {}, now = new Date(), today = (now.getDay() + 6) % 7;
+  const add = (d, min) => { const k = Math.floor(min / SLOT), l = ((out[d] = out[d] || {})[k] = out[d][k] || []), t = hhmm(min); if (!l.includes(t)) l.push(t); };
+  (rs.marks || []).forEach(m => add(Math.floor(m / 1440), m % 1440));
+  if (!rs || rs.every === "off") return out;
+  const at = /^\d{2}:\d{2}$/.test(rs.at || "") ? hm(rs.at) : 240, hh = Math.floor(at / 60), mm = at % 60;
+  for (let d = 0; d < 7; d++) {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (d - today));
+    if (rs.every === "hour") for (let h = 0; h < 24; h++) add(d, h * 60 + mm);
+    else if (rs.every === "6h" || rs.every === "12h") { const st = rs.every === "6h" ? 6 : 12; for (let h = 0; h < 24; h++) if (((h - hh) % st + st) % st === 0) add(d, h * 60 + mm); }
+    else if (rs.every === "day") add(d, at);
+    else if (rs.every === "week") { if (d === Number(rs.day || 0)) add(d, at); }
+    else if (rs.every === "month" || rs.every === "3months") {
+      if (date.getDate() !== Number(rs.mday || 1)) continue;
+      if (rs.every === "3months" && rs.anchor != null && (((date.getFullYear() * 12 + date.getMonth() - rs.anchor) % 3) + 3) % 3) continue;
+      add(d, at);
+    }
+  }
+  return out;
+}
+function drawWeek() {
+  const g = gridFromRules(rules), now = new Date(), today = (now.getDay() + 6) % 7, nowSlot = Math.floor((now.getHours() * 60 + now.getMinutes()) / SLOT);
+  const RS = restartsThisWeek(), marks = new Set(rs.marks || []);
+  let h = `<div></div><div class="hrs">${[0, 3, 6, 9, 12, 15, 18, 21].map(x => `<span class="${x >= 12 ? "pm" : ""}">${String(x).padStart(2, "0")}:00</span>`).join("")}</div>`;
+  for (let d = 0; d < 7; d++) {
+    let cells = "";
+    for (let k = 0; k < NSLOT; k++) {
+      const key0 = g[d][k], key = key0 === BACK ? null : key0, sh = key == null ? null : shadeOf(key), rest = key != null && key === base;
+      const first = key != null && !rest && (k === 0 ? g[(d + 6) % 7][NSLOT - 1] !== key0 : g[d][k - 1] !== key0);
+      const t0 = hhmm(k * SLOT), t1 = k === NSLOT - 1 ? "24:00" : hhmm((k + 1) * SLOT);
+      const rsAt = (RS[d] || {})[k], marked = marks.has(d * 1440 + k * SLOT);
+      cells += `<div class="blk ${sh != null && sh >= 3 && !rest ? "strong" : ""} ${rest ? "rest" : ""} ${k % 2 === 0 && k ? "hr" : ""} ${d === today && k === nowSlot ? "now" : ""} ${rsAt ? "rs" : ""}"
+        data-d="${d}" data-k="${k}" data-tip="${esc(`${DAYS[d]} ${t0}–${t1}<br><b>${key == null ? (key0 === BACK ? "nothing scheduled (back to what it ran before)" : "no schedule") : labelOf(key)}</b>${rest ? " (the rest of the time)" : ""}${first ? "<br>switches here" : ""}${rsAt ? `<br>↻ restart at ${rsAt.join(", ")}${marked ? " (marked)" : " (repeat)"}` : ""}`)}"
+        style="${sh != null ? `background:${rest ? `color-mix(in srgb, var(--ramp-${sh}) 40%, var(--cell-empty))` : `var(--ramp-${sh})`}` : ""}">${first ? esc(short(key)) : ""}</div>`;
+    }
+    h += `<div class="day ${d === today ? "today" : ""}">${DAYS[d]}</div><div class="blocks">${cells}</div>`;
+  }
+  $("week").innerHTML = h;
+  const ps = okPresets();
+  $("key").innerHTML = (ps.length ? ps.map(([k, p]) => `<span><i style="background:var(--ramp-${shadeOf(k)})"></i>${esc(short(k))} = ${esc(p.label)}</span>`).join("") +
+    (base && base !== BACK ? `<span><i style="background:color-mix(in srgb, var(--ramp-${shadeOf(base)}) 40%, var(--cell-empty))"></i>lighter = the rest of the time (${esc(labelOf(base))})</span>`
+      : `<span><i style="background:var(--cell-empty)"></i>empty = nothing scheduled</span>`) +
+    `<span><i style="outline:2px solid var(--ok);outline-offset:-2px"></i>now</span><span>Letters mark where a preset starts.</span>` : "") +
+    (Object.keys(RS).length ? `<span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i><b>↻</b> = restart</span>` : "");
+}
+// painting: a click paints one block, a drag paints the rectangle from the first block (drag down for several days)
+let painting = false, paintFrom = null, paintBase = null, markBase = null, markMode = null;
+function rectOf(el) {
+  const d = Number(el.dataset.d), k = Number(el.dataset.k), [d0, k0] = paintFrom || [d, k], out = [];
+  for (let dd = Math.min(d0, d); dd <= Math.max(d0, d); dd++)
+    for (let kk = Math.min(k0, k); kk <= Math.max(k0, k); kk++) out.push([dd, kk]);
+  return out;
+}
+function paintAt(el) {
+  if (!el) return;
+  const cells = rectOf(el);
+  if (brush === RS_BRUSH || brush === ERASE) {
+    // restart marks: add (at least an hour apart) or, when the drag started on a mark (or erasing), remove
+    const set = new Set(markBase), add = brush === RS_BRUSH && markMode === "add";
+    for (const [dd, kk] of cells.sort((a, b) => a[0] * 48 + a[1] - (b[0] * 48 + b[1]))) {
+      const m = dd * 1440 + kk * SLOT;
+      if (!add) { set.delete(m); continue; }
+      if (set.size >= 168 || [...set].some(x => Math.min(Math.abs(x - m), 7 * 1440 - Math.abs(x - m)) < 60)) continue;
+      set.add(m);
+    }
+    rs.marks = [...set].sort((a, b) => a - b);
+    if (brush === RS_BRUSH) { changed(); return; }
+  }
+  if (brush !== RS_BRUSH && paintBase) {
+    const g = paintBase.map(r => r.slice());
+    for (const [dd, kk] of cells) g[dd][kk] = brush === ERASE ? null : brush;
+    rules = rulesFromGrid(g);
+  }
+  changed(true);
+}
+$("week").addEventListener("pointerdown", (e) => {
+  const el = e.target.closest(".blk"); if (!el) return;
+  if (!brush) return;
+  painting = true; paintFrom = [Number(el.dataset.d), Number(el.dataset.k)];
+  markBase = [...(rs.marks || [])];
+  markMode = markBase.includes(paintFrom[0] * 1440 + paintFrom[1] * SLOT) ? "remove" : "add";
+  if (brush === RS_BRUSH && markMode === "add") {
+    const m = paintFrom[0] * 1440 + paintFrom[1] * SLOT, near = markBase.find(x => Math.min(Math.abs(x - m), 7 * 1440 - Math.abs(x - m)) < 60);
+    if (near != null) toast(`Restarts are kept at least an hour apart (${DAYS[Math.floor(near / 1440)]} ${hhmm(near % 1440)} is too close)`, true);
+  }
+  if (brush !== RS_BRUSH) {
+    const g = gridFromRules(rules);
+    // unpainted so far: keep it unpainted (the rest of the time); pick a rest-of-the-time preset if there's none yet
+    if (!base) { base = defaultBase(brush === ERASE ? null : brush); if (base) toast(`The rest of the time it runs ${labelOf(base)} (change it under the week)`); renderBrushes(); }
+    paintBase = g.map(r => r.map(x => x === base ? null : x));
+  }
+  paintAt(el); e.preventDefault();
+});
+window.addEventListener("pointermove", (e) => {
+  const tip = $("tip");
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const blk = el && el.closest && el.closest(".blk");
+  if (painting && blk) paintAt(blk);
+  if (blk && !painting) {
+    tip.innerHTML = blk.dataset.tip; tip.style.display = "block";
+    tip.style.left = Math.min(innerWidth - tip.offsetWidth - 8, e.clientX + 14) + "px"; tip.style.top = (e.clientY + 16) + "px";
+  } else tip.style.display = "none";
+});
+window.addEventListener("pointerup", () => { painting = false; paintFrom = null; paintBase = null; markBase = null; });
+
+function renderRules() {
+  const opts = (sel) => okPresets().map(([k, p]) => `<option value="${esc(k)}" ${k === sel ? "selected" : ""}>${esc(p.label)}${p.mhz ? ` (${p.mhz} MHz)` : ""}</option>`).join("")
+    + `<option value="${BACK}" ${sel === BACK ? "selected" : ""}>back to what it ran before</option>`;
+  $("rules").innerHTML = rules.map((r, i) => `
+    <div class="rule" data-i="${i}">
+      <span class="lbl">At</span><input type="time" step="60" value="${esc(r.start)}" data-k="start" />
+      <span class="lbl">on</span><span class="days">${DAYS.map((d, di) => `<button type="button" data-d="${di}" class="${(r.days || []).includes(di) ? "on" : ""}">${d}</button>`).join("")}</span>
+      <span class="lbl">switch to</span><select data-k="preset">${opts(r.preset)}</select>
+      <button type="button" data-del="${i}" title="Remove">×</button>
+    </div>`).join("") || `<p class="muted" style="margin:.2rem 0">No changes yet.</p>`;
+  $("rules").querySelectorAll(".rule").forEach(row => {
+    const i = Number(row.dataset.i);
+    row.querySelector("[data-k=start]").onchange = (e) => { rules[i].start = e.target.value; changed(); };
+    row.querySelector("[data-k=preset]").onchange = (e) => { rules[i].preset = e.target.value; changed(); };
+    row.querySelectorAll("[data-d]").forEach(b => b.onclick = () => {
+      const d = Number(b.dataset.d), set = new Set(rules[i].days || []);
+      set.has(d) ? set.delete(d) : set.add(d); rules[i].days = [...set].sort(); changed(true);
+    });
+    row.querySelector("[data-del]").onclick = () => { rules.splice(i, 1); changed(true); };
+  });
+}
+function check() {
+  const errs = [], seen = {};
+  const ok = Object.fromEntries(okPresets());
+  rules.forEach((r) => {
+    if (!/^\d{2}:\d{2}$/.test(r.start || "")) errs.push("Every change needs a time.");
+    if (!(r.days || []).length) errs.push(`The ${r.start || "?"} change needs at least one day.`);
+    if (!ok[r.preset] && r.preset !== BACK) errs.push(`Pick a preset for the ${r.start || "?"} change.`);
+    (r.days || []).forEach(d => { const k = d + "|" + r.start; if (seen[k]) errs.push(`Two changes at ${r.start} on ${DAYS[d]}.`); seen[k] = 1; });
+  });
+  if ($("schOn").checked && !rules.length) errs.push("Add at least one change before turning the schedule on.");
+  if (["hour", "6h", "12h", "day", "week", "month", "3months"].includes(rs.every) && !/^\d{2}:\d{2}$/.test(rs.at || "")) errs.push("Set a time for the restart.");
+  if ((rs.every === "month" || rs.every === "3months") && !(rs.mday >= 1 && rs.mday <= 28)) errs.push("The restart's day of the month must be 1-28 (so it's in every month).");
+  return [...new Set(errs)];
+}
+const snapshot = () => JSON.stringify({ e: $("schOn").checked, r: rules, rs: rsBody(), b: base });
+function rsBody() {
+  const b = { every: rs.every, marks: rs.marks || [] };
+  if (rs.every !== "off") {
+    b.at = rs.at; if (rs.every === "week") b.day = Number(rs.day || 0);
+    if (rs.every === "month" || rs.every === "3months") b.mday = Number(rs.mday || 1);
+    if (rs.every === "3months" && rs.anchor != null && rs._savedEvery === "3months" && rs._savedMday === Number(rs.mday)) b.anchor = rs.anchor;
+  }
+  return b;
+}
+function renderRestart() {
+  const sel = $("rsEvery");
+  if (!sel.options.length) {
+    sel.innerHTML = EVERY.map(([k, l]) => `<option value="${k}">${l}</option>`).join("");
+    $("rsDay").innerHTML = DAYS.map((d, i) => `<option value="${i}">${d}</option>`).join("");
+  }
+  sel.value = rs.every; $("rsAt").value = rs.at || "04:00"; $("rsDay").value = String(rs.day || 0); $("rsMday").value = rs.mday || 1;
+  const e = rs.every;
+  document.querySelector(".rs-at").classList.toggle("hidden", e === "off");
+  document.querySelector(".rs-day").classList.toggle("hidden", e !== "week");
+  document.querySelector(".rs-mday").classList.toggle("hidden", e !== "month" && e !== "3months");
+  if (e === "hour") $("rsAt").title = "Only the minutes count: every hour at this many minutes past";
+  renderRestartCost();
+}
+// what the restarts cost in mining: each one stops hashing for the miner's measured restart time, plus warm-up
+function renderRestartCost() {
+  const nm = (rs.marks || []).length;
+  const per = ({ hour: 168, "6h": 28, "12h": 14, day: 7, week: 1, month: 12 / 52, "3months": 4 / 52 }[rs.every] || 0) + nm;
+  if ($("rsMarksLine")) $("rsMarksLine").textContent = nm ? `${nm} restart${nm === 1 ? "" : "s"} marked on the week (each repeats weekly).` : "No restarts marked on the week.";
+  const el = $("rsCost"); if (!el) return;
+  if (!per) { el.innerHTML = ""; return; }
+  const sec = ((miner() || {}).restart_s || 75) + 60, pct = per * sec / (7 * 86400) * 100, day = per / 7;
+  const txt = `${day >= 1 ? `About ${+day.toFixed(1)} restart${day >= 1.05 ? "s" : ""} a day` : `About ${+per.toFixed(per < 1 ? 2 : 0)} restart${per === 1 ? "" : "s"} a week`}.
+    Each one stops hashing for about ${sec - 60} s (this miner's measured restart) plus a minute or so to get back to full speed,
+    so about ${pct < 0.1 ? "<0.1" : pct.toFixed(pct < 1 ? 1 : 0)}% less mining, and the best share since restart starts again from 0 each time.`;
+  el.innerHTML = day >= 4 ? `<div class="note warn">${txt} That's a lot: once a day or once a week is plenty for keeping a miner fresh.</div>`
+    : `<p class="hint">${txt}</p>`;
+}
+function renderRestartStatus() {
+  const s = ((miner() || {}).schedule) || {}, pill = $("rsPill");
+  const on = !!(s.restart && ((s.restart.every && s.restart.every !== "off") || (s.restart.marks || []).length));
+  pill.textContent = on ? "on" : "off"; pill.className = "pill" + (on ? " ok" : "");
+  const last = s.restart_last;
+  $("rsNext").innerHTML = (on ? `Saved: restart ${esc(s.restart_line)}${s.restart_next ? ` · next ${esc(fmtD(s.restart_next))}` : ""}` : "No scheduled restart saved.")
+    + (last ? ` · last: ${esc(last.msg)} ${esc(fmtD(last.at))}` : "");
+}
+["rsEvery", "rsAt", "rsDay", "rsMday"].forEach(id => $(id).addEventListener("change", () => {
+  rs.every = $("rsEvery").value; rs.at = $("rsAt").value; rs.day = Number($("rsDay").value); rs.mday = Number($("rsMday").value);
+  renderRestart(); changed();
+}));
+function changed(rerender) {
+  if (rerender) renderRules();
+  renderRestartCost();
+  drawWeek();
+  const errs = check(), d = snapshot() !== saved;
+  $("err").innerHTML = errs.map(esc).join("<br>");
+  $("dirtyPill").textContent = d ? "unsaved changes" : "saved"; $("dirtyPill").className = "pill" + (d ? " warn" : "");
+  $("btnSave").disabled = $("btnSave2").disabled = !d || errs.length > 0; $("btnUndo").disabled = !d;
+}
+
+function renderStatus() {
+  const m = miner(); if (!m) return;
+  const s = m.schedule || {};
+  $("schOn").checked = enabled;
+  const pill = $("statePill");
+  const st = m.tuning ? ["waiting: being tuned", "warn"] : !s.enabled ? ["off", ""] : s.paused ? ["paused", "warn"] : ["running", "ok"];
+  pill.textContent = st[0]; pill.className = "pill " + st[1];
+  const active = m.active_preset && m.presets[m.active_preset];
+  $("nowLine").textContent = active ? (active.idle ? "On the miner now: Idle (not hashing)" : `On the miner now: ${active.label} (${active.mhz} MHz · ${active.mv} mV · PV ${active.pv})`) : "On the miner now: no preset (its own or a hand-set clock)";
+  $("nextLine").textContent = s.now ? `Schedule: ${s.now} since ${fmt(s.since)} · next ${s.next} at ${fmt(s.next_at)}`
+    : "No schedule yet for this miner.";
+  let notes = "";
+  if (!Object.keys(m.presets || {}).length) notes += `<div class="note warn">This miner has no presets yet. Run a search on the <a href="/tuner.html?miner=${encodeURIComponent(m.id)}">Tuner</a> with <i>Build presets</i> ticked, or make one on <a href="/profiles.html?miner=${encodeURIComponent(m.id)}">Profiles</a>.</div>`;
+  if (m.tuning) notes += `<div class="note warn">A tuning run is going on this miner, so the schedule waits. It carries on by itself when the run ends.</div>`;
+  if (s.enabled && s.paused) notes += `<div class="note warn">Paused: ${esc(s.paused.reason)} (${fmt(s.paused.at)}). <button type="button" id="btnResume">Resume the schedule</button></div>`;
+  if (s.error) notes += `<div class="note bad">Last change didn't go through: ${esc(s.error)}. It's tried again every 5 minutes.</div>`;
+  $("notes").innerHTML = notes;
+  if ($("btnResume")) $("btnResume").onclick = () => setPause(false);
+  $("copyList").innerHTML = S.miners.filter(x => x.id !== m.id).map(x => `<label><input type="checkbox" value="${esc(x.id)}" /> ${esc(x.name)}</label>`).join("")
+    || `<span class="muted">No other miners.</span>`;
+}
+
+function mostUsed(rs) {          // a schedule from before "the rest of the time": its most-used preset
+  const n = {}; gridFromRules(rs).flat().forEach(k => { if (k != null && k !== BACK) n[k] = (n[k] || 0) + 1; });
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0] || null;
+}
+function pickMiner(id, force) {
+  if (!force && snapshot() !== saved && !confirm("Leave without saving the changes to this schedule?")) { $("minerSel").value = minerId; return; }
+  minerId = id; history.replaceState(null, "", "?miner=" + encodeURIComponent(id));
+  const m = miner(); const s = (m && m.schedule) || {};
+  rules = JSON.parse(JSON.stringify(s.rules || [])); enabled = !!s.enabled;
+  rs = Object.assign({ every: "off", at: "04:00", day: 0, mday: 1, marks: [] }, JSON.parse(JSON.stringify(s.restart || {})));
+  if (rs.every === "marks") rs.every = "off";    // 1.11.0's "at the blocks I mark": the marks are kept
+  rs._savedEvery = rs.every; rs._savedMday = Number(rs.mday);
+  base = s.base === BACK || (s.base && (m.presets || {})[s.base]) ? s.base : (rules.length ? mostUsed(rules) : BACK);
+  $("schOn").checked = enabled; saved = snapshot();
+  renderStatus(); renderRestart(); renderRestartStatus(); renderBrushes(); renderRules(); changed();
+}
+async function load(keepEdits) {
+  try { S = await api("GET", "/api/schedule/state"); }
+  catch (e) { toast("Couldn't load: " + e.message, true); return; }
+  $("tz").textContent = `${S.timezone} (UTC${S.utc_offset.slice(0, 3)}:${S.utc_offset.slice(3)})`;
+  const sel = $("minerSel");
+  sel.innerHTML = S.miners.map(m => `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.ip)})</option>`).join("") || `<option value="">no miners yet</option>`;
+  if (!miner() && S.miners.length) minerId = S.miners[0].id;
+  sel.value = minerId;
+  if (keepEdits && snapshot() !== saved) { renderStatus(); renderRestartStatus(); drawWeek(); return; }
+  pickMiner(minerId, true);
+}
+$("minerSel").onchange = () => pickMiner($("minerSel").value);
+$("schOn").onchange = () => changed();
+$("btnAdd").onclick = () => {
+  const ps = okPresets(); if (!ps.length) return toast("This miner has no presets yet", true);
+  rules.push({ start: "08:00", days: [0, 1, 2, 3, 4, 5, 6], preset: ps[0][0] }); changed(true);
+};
+function pick(...keys) { const ok = Object.fromEntries(okPresets()); return keys.find(k => ok[k]) || (okPresets()[0] || [])[0]; }
+const ALL = [0, 1, 2, 3, 4, 5, 6];
+$("rules").parentNode.querySelectorAll("[data-tpl]").forEach(b => b.onclick = () => {
+  if (!okPresets().length) return toast("This miner has no presets yet", true);
+  if (rules.length && !confirm("Replace the changes below with this example?")) return;
+  const t = b.dataset.tpl;
+  if (t === "nights") rules = [{ start: "07:00", days: ALL, preset: pick("high", "middle") }, { start: "23:00", days: ALL, preset: pick("lowest", "low") }];
+  if (t === "tariff") rules = [{ start: "08:00", days: ALL, preset: pick("low", "middle") }, { start: "23:00", days: ALL, preset: pick("high", "middle") }];
+  if (t === "weekend") rules = [{ start: "00:00", days: [0, 1, 2, 3, 4], preset: pick("high", "middle") }, { start: "00:00", days: [5, 6], preset: pick("low", "lowest") }];
+  $("schOn").checked = true; changed(true);
+});
+$("btnUndo").onclick = () => pickMiner(minerId, true);
+$("btnSave").onclick = $("btnSave2").onclick = async () => {
+  const errs = check(); if (errs.length) return toast(errs[0], true);
+  const sorted = [...rules].sort((a, b) => hm(a.start) - hm(b.start));
+  try {
+    const j = await api("POST", "/api/schedule/save", { miner_id: minerId, enabled: $("schOn").checked, rules: sorted, restart: rsBody(), base });
+    const rl = j.schedule && j.schedule.restart_next ? ` · next restart ${fmtD(j.schedule.restart_next)}` : "";
+    toast(($("schOn").checked ? "Schedule saved: the change in force now is applied within about 30 s" : "Schedule saved (preset changes off)") + rl);
+    await load(); pickMiner(minerId, true);
+  } catch (e) { toast(e.message, true); }
+};
+$("btnClear").onclick = async () => {
+  if (!confirm("Clear this miner's preset changes? Its presets and its scheduled restart stay; nothing changes on the miner.")) return;
+  try { await api("POST", "/api/schedule/save", { miner_id: minerId, enabled: false, rules: [], restart: rsBody(), base }); toast("Schedule cleared"); await load(); pickMiner(minerId, true); }
+  catch (e) { toast(e.message, true); }
+};
+async function setPause(p) {
+  try { await api("POST", "/api/schedule/pause", { miner_id: minerId, paused: p }); toast(p ? "Paused" : "Resumed: applying the change in force now"); await load(true); }
+  catch (e) { toast(e.message, true); }
+}
+$("btnCopy").onclick = async () => {
+  const to = [...$("copyList").querySelectorAll("input:checked")].map(i => i.value);
+  if (!to.length) return toast("Tick the miners to copy to", true);
+  try {
+    const j = await api("POST", "/api/schedule/copy", { from: minerId, to });
+    const skipped = Object.entries(j.skipped || {}).map(([k, v]) => `${(S.miners.find(m => m.id === k) || {}).name || k}: ${v}`);
+    toast(`Copied to ${j.copied.length} miner${j.copied.length === 1 ? "" : "s"}` + (skipped.length ? ` · skipped ${skipped.join(" · ")}` : ""), skipped.length && !j.copied.length);
+    await load(true);
+  } catch (e) { toast(e.message, true); }
+};
+$("btnRefresh").onclick = () => load(true);
+document.addEventListener("themechange", drawWeek);
+window.addEventListener("beforeunload", (e) => { if (snapshot() !== saved) { e.preventDefault(); e.returnValue = ""; } });
+load();
+setInterval(() => { if (!document.hidden) load(true); }, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign In · Blake2b ASIC Control</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
+  <style>
+    main { max-width: 420px; padding-top: 3rem; }
+    form { display: flex; flex-direction: column; gap: .8rem; }
+    form label { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--muted); }
+    form input { width: 100%; }
+    form button { margin-top: .3rem; }
+    .err { color: var(--bad); font-size: .85rem; min-height: 1.2em; margin: 0; }
+    .ok { color: var(--ok); font-size: .85rem; margin: 0; }
+    .brand-big { text-align: center; margin: 0 0 1.4rem; font-size: 1.4rem; }
+    .brand-big { color: var(--muted); }
+    .brand-big .brand { color: var(--text); font-weight: 700; }
+    /* disclaimer */
+    .dz-back { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.72); display: flex;
+               align-items: flex-start; justify-content: center; padding: 3vh 16px; overflow-y: auto; }
+    :root[data-theme="light"] .dz-back { background: rgba(0,0,0,.45); }
+    .dz { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; max-width: 620px; width: 100%;
+          padding: 1.2rem 1.3rem 1.1rem; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .dz h2 { margin: 0 0 .2rem; font-size: 1.15rem; display: flex; gap: .5rem; align-items: center; }
+    .dz h2 .warnmark { color: var(--warn); }
+    .dz .lead { color: var(--muted); font-size: .85rem; margin: 0 0 .8rem; }
+    .dz-body { font-size: .88rem; line-height: 1.55; max-height: 52vh; overflow-y: auto; padding-right: .3rem;
+               border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding-top: .6rem; }
+    .dz-body h3 { font-size: .9rem; margin: .8rem 0 .25rem; }
+    .dz-body h3:first-child { margin-top: 0; }
+    .dz-body ul { margin: .2rem 0 .5rem; padding-left: 1.2rem; }
+    .dz-body p { margin: .3rem 0 .5rem; }
+    .dz-check { display: flex; gap: .55rem; align-items: flex-start; margin: .9rem 0 .3rem; font-size: .9rem; cursor: pointer; }
+    .dz-check input { margin-top: .2rem; }
+    .dz-acts { display: flex; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; margin-top: .6rem; }
+    .dz-seen { font-size: .75rem; color: var(--muted); margin: .5rem 0 0; }
+  </style>
+</head>
+<body>
+  <div style="position:fixed;top:.8rem;right:1rem"><button type="button" class="theme-btn" data-theme-toggle>☀ Light</button></div>
+  <main>
+    <h1 class="brand-big"><span class="brand">Blake2b</span> ASIC Control</h1>
+
+    <!-- first run -->
+    <section class="panel hidden" id="setupPanel">
+      <h2>Create your login</h2>
+      <p class="muted" style="font-size:.85rem;margin-top:0">No account exists yet. The account you create here is the only one that can open the dashboard.</p>
+      <form id="setupForm" autocomplete="on">
+        <label>Username<input name="username" autocomplete="username" required /></label>
+        <label>Password (at least 8 characters)<input name="password" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <label>Password again<input name="password2" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <p class="err" id="setupErr"></p>
+        <button type="submit" class="primary">Create login</button>
+      </form>
+    </section>
+
+    <!-- sign in -->
+    <section class="panel hidden" id="loginPanel">
+      <h2>Sign in</h2>
+      <p class="muted hidden" id="umbrelHint" style="font-size:.85rem;margin-top:0">First time? Use the default
+        username and password that Umbrel shows for this app. You can change them afterwards under Settings → Account.</p>
+      <form id="loginForm" autocomplete="on">
+        <label>Username<input name="username" autocomplete="username" required /></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
+        <p class="err" id="loginErr"></p>
+        <button type="submit" class="primary">Sign in</button>
+      </form>
+    </section>
+
+    <!-- signed in: account -->
+    <section class="panel hidden" id="accountPanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Account</h2>
+        <button type="button" onclick="location.href='/#settings'">← Settings</button>
+      </div>
+      <p class="muted" style="font-size:.85rem">Signed in as <b id="who"></b>.</p>
+      <form id="changeForm" autocomplete="on">
+        <label>Current password<input name="current" type="password" autocomplete="current-password" required /></label>
+        <label>New username (leave empty to keep it)<input name="username" autocomplete="username" /></label>
+        <label>New password (at least 8 characters)<input name="password" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <label>New password again<input name="password2" type="password" autocomplete="new-password" required minlength="8" /></label>
+        <p class="err" id="changeErr"></p>
+        <button type="submit" class="primary">Change login</button>
+      </form>
+      <div class="row" style="margin-top:1rem;justify-content:space-between">
+        <span class="muted" style="font-size:.8rem">Changing it signs out every other device.</span>
+        <button type="button" id="btnShowDz">Disclaimer</button>
+        <button type="button" class="danger" id="btnLogout">Log out</button>
+      </div>
+    </section>
+    <p class="footer-note">One sign-in covers every page, and stays signed in for 30 days (also across app updates).
+      Forgot the password? Delete <code>auth.json</code> in the app's data folder and restart the app.</p>
+  </main>
+
+  <!-- disclaimer: must be acknowledged before signing in -->
+  <div class="dz-back hidden" id="dzBack" role="dialog" aria-modal="true" aria-labelledby="dzTitle">
+    <div class="dz">
+      <h2 id="dzTitle"><span class="warnmark">▲</span> Use at your own risk</h2>
+      <p class="lead" id="dzLead">Please read this before signing in.</p>
+      <div class="dz-body" tabindex="0">
+        <h3>What this app does</h3>
+        <p>Blake2b ASIC Control changes settings on your mining hardware: clock speed (MHz), voltage (mV), PV and fan
+          speed. The tuner, presets and fan curves change them automatically. Settings other than the manufacturer's
+          defaults can:</p>
+        <ul>
+          <li>damage hash chips, hash boards, power supplies and fans, or shorten their life</li>
+          <li>make the hardware overheat and, in the worst case, cause a fire</li>
+          <li>void your warranty</li>
+          <li>lower or stop your hashrate and earnings</li>
+        </ul>
+        <h3>Automatic doesn't mean safe</h3>
+        <p>The tuner's tests, the presets it builds and the fan curves can be wrong, and a setting that passed a test can
+          still fail later (a hotter room, an aging chip, a dusty fan). The safety limits lower the risk; they can't remove
+          it. Keep your miners somewhere heat, smoke or fire would be noticed, and check on them.</p>
+        <h3>No warranty, no liability</h3>
+        <p>This software is provided "as is", without warranty of any kind. Its authors and contributors take no
+          responsibility and accept no liability for any damage to hardware or property, loss of earnings, injury or any
+          other loss that comes from using it. You alone are responsible for your hardware and for every setting you apply
+          with it, whether by hand or automatically.</p>
+        <h3>Not an official product</h3>
+        <p>This app is not affiliated with, endorsed by or supported by any miner manufacturer. Product and model names
+          are only used to say which hardware it works with.</p>
+      </div>
+      <label class="dz-check" id="dzCheckRow"><input type="checkbox" id="dzCheck" />
+        <span>I have read this, I understand the risks, and I accept full responsibility for my hardware.</span></label>
+      <div class="dz-acts">
+        <button type="button" id="dzClose" class="hidden">Close</button>
+        <button type="button" class="primary" id="dzAck" disabled>Acknowledge</button>
+      </div>
+      <p class="dz-seen hidden" id="dzSeen"></p>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function nextUrl() {
+  // only a page of this app: "/\\evil.example" or a tab trick must never send you to another site
+  const n = new URLSearchParams(location.search).get("next") || "/";
+  if (!n.startsWith("/") || /[\\\s]/.test(n) || /[\u0000-\u001f]/.test(n)) return "/";
+  try {
+    const u = new URL(n, location.origin);
+    if (u.origin !== location.origin || u.pathname.startsWith("//") || u.pathname.startsWith("/login.html")) return "/";
+    return u.pathname + u.search + u.hash;
+  } catch (e) { return "/"; }
+}
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(body || {}), credentials: "same-origin" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+const fields = (f) => Object.fromEntries(new FormData(f).entries());
+let DZ = "";         // disclaimer version acknowledged on this page (sent with sign-in)
+let dzVersion = "";
+let dzThen = null;   // what to do after "Acknowledge"
+function showDisclaimer(mode, then) {
+  // mode "gate": must acknowledge before going on; "view": read only
+  const gate = mode !== "view";
+  $("dzLead").textContent = gate ? "Please read this and acknowledge it before signing in." : "The terms you acknowledged when signing in.";
+  $("dzCheckRow").classList.toggle("hidden", !gate);
+  $("dzAck").classList.toggle("hidden", !gate);
+  $("dzClose").classList.toggle("hidden", gate);
+  $("dzCheck").checked = false; $("dzAck").disabled = true;
+  dzThen = then || null;
+  $("dzBack").classList.remove("hidden");
+  document.querySelectorAll("main input, main button").forEach(el => el.tabIndex = -1);
+  (gate ? $("dzCheck") : $("dzClose")).focus();
+}
+function hideDisclaimer() {
+  $("dzBack").classList.add("hidden");
+  document.querySelectorAll("main input, main button").forEach(el => el.removeAttribute("tabindex"));
+}
+$("dzCheck").onchange = () => { $("dzAck").disabled = !$("dzCheck").checked; };
+$("dzAck").onclick = async () => {
+  DZ = dzVersion; hideDisclaimer();
+  if (dzThen) await dzThen();
+};
+$("dzClose").onclick = hideDisclaimer;
+$("btnShowDz").onclick = () => showDisclaimer("view");
+
+async function init() {
+  const r = await fetch("/api/auth/status", { credentials: "same-origin" });
+  const s = await r.json();
+  dzVersion = s.disclaimer_version || "";
+  const show = (id) => ["setupPanel", "loginPanel", "accountPanel"].forEach(p => $(p).classList.toggle("hidden", p !== id));
+  if (!s.has_account) {
+    show("setupPanel");
+    showDisclaimer("gate", () => document.querySelector("#setupForm input").focus());
+  }
+  else if (!s.user) {
+    show("loginPanel");
+    $("umbrelHint").classList.toggle("hidden", !s.umbrel_default);
+    showDisclaimer("gate", () => document.querySelector("#loginForm input").focus());
+  }
+  else if (!s.ack_ok) {
+    // signed in before the disclaimer existed (or it changed): acknowledge once, then carry on
+    show("accountPanel"); $("who").textContent = s.user;
+    showDisclaimer("gate", async () => {
+      try { await post("/api/auth/ack", { disclaimer: DZ }); location.href = nextUrl(); }
+      catch (err) { $("changeErr").textContent = err.message; }
+    });
+  }
+  else {
+    show("accountPanel"); $("who").textContent = s.user;
+    if (s.last_ack) { $("dzSeen").textContent = `Acknowledged ${String(s.last_ack.at).replace("T", " ").slice(0, 16)}.`; $("dzSeen").classList.remove("hidden"); }
+    if (location.hash === "#disclaimer") showDisclaimer("view");   // from Settings → Account
+  }
+}
+
+$("setupForm").onsubmit = async (e) => {
+  e.preventDefault(); const d = fields(e.target);
+  if (d.password !== d.password2) return $("setupErr").textContent = "The passwords don't match.";
+  if (!DZ) return showDisclaimer("gate", () => $("setupForm").requestSubmit());
+  try { await post("/api/auth/setup", { ...d, disclaimer: DZ }); location.href = nextUrl(); }
+  catch (err) { $("setupErr").textContent = err.message; }
+};
+$("loginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (!DZ) return showDisclaimer("gate", () => $("loginForm").requestSubmit());
+  try { await post("/api/auth/login", { ...fields(e.target), disclaimer: DZ }); location.href = nextUrl(); }
+  catch (err) { $("loginErr").textContent = err.message; }
+};
+$("changeForm").onsubmit = async (e) => {
+  e.preventDefault(); const d = fields(e.target);
+  if (d.password !== d.password2) return $("changeErr").textContent = "The new passwords don't match.";
+  try {
+    await post("/api/auth/change", d);
+    $("changeErr").className = "ok"; $("changeErr").textContent = "Login changed.";
+    e.target.reset(); init();
+  } catch (err) { $("changeErr").className = "err"; $("changeErr").textContent = err.message; }
+};
+$("btnLogout").onclick = async () => { await post("/api/auth/logout").catch(() => {}); location.href = "/login.html"; };
+init();
+</script>
+</body>
+</html>

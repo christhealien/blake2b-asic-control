@@ -1,0 +1,7 @@
+# keep local runs and data out of the build context (data/miners.json holds passwords)
+local/
+data/
+__pycache__/
+*.pyc
+*.zip
+.env

@@ -1,0 +1,2 @@
+id: "blake2b" # prefix every app id in this store must start with (letters and dashes only; changing it means reinstalling the apps)
+name: "christhealien Store"

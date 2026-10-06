@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profiles · Blake2b ASIC Control</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/theme.css" />
+  <script src="/theme.js"></script>
+  <style>
+    .hdr-right { display: flex; flex-direction: column; align-items: flex-end; gap: .4rem; }
+    @media (max-width: 640px) { .hdr-right { align-items: flex-start; } }
+    .intro { font-size: .88rem; margin: -.2rem 0 .7rem; max-width: 72rem; line-height: 1.5; }
+    .hint { color: var(--muted); font-size: .8rem; margin: .35rem 0 .5rem; line-height: 1.45; max-width: 72rem; }
+    .minerbar { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+    .minerbar select { min-width: 14rem; }
+    .stat { display: inline-flex; flex-direction: column; padding: .35rem .7rem; border-radius: 10px;
+            background: var(--panel2); border: 1px solid var(--border); min-width: 7rem; }
+    .stat small { color: var(--muted); font-size: .7rem; } .stat b { font-family: var(--mono); font-size: .95rem; }
+    /* presets */
+    .pcards { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+    .pcard { border: 1px solid var(--border); border-radius: 12px; padding: .8rem .9rem; background: var(--panel2);
+             display: flex; flex-direction: column; gap: .35rem; min-height: 11rem; }
+    .pcard.active { border-color: var(--text); box-shadow: 0 0 0 1px var(--text) inset; background: var(--sel-bg); }
+    .pcard.empty { border-style: dashed; opacity: .8; }
+    .pcard.failed { border-color: #6e2626; }
+    .pcard h3 { margin: 0; font-size: .98rem; display: flex; gap: .5rem; align-items: center; justify-content: space-between; }
+    .pcard .clock { font: 600 1.3rem/1.2 var(--mono); }
+    .pcard .sub { font-family: var(--mono); font-size: .8rem; color: var(--muted); }
+    .pcard .meta { font-size: .78rem; color: var(--muted); line-height: 1.45; }
+    .pcard .acts { margin-top: auto; display: flex; gap: .4rem; flex-wrap: wrap; }
+    .pcard svg { width: 100%; height: 38px; display: block; }
+    .note { border-radius: 10px; padding: .55rem .75rem; font-size: .85rem; margin: .5rem 0; border: 1px solid var(--border); }
+    .note.bad { color: var(--bad); border-color: #5a2323; background: #220c0c; }
+    .note.warn { color: var(--warn); border-color: #5a4a1f; background: #221b09; }
+    :root[data-theme="light"] .note.bad { border-color: #e3a1a1; background: #fdeaea; }
+    :root[data-theme="light"] .note.warn { border-color: #e2c98a; background: #fbf3de; }
+    :root[data-theme="light"] .pcard.active { background: #fff; }
+    :root[data-theme="light"] .pcard.failed { border-color: #e3a1a1; }
+    .form-grid { display: grid; gap: .6rem .9rem; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .form-grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: var(--muted); }
+    .form-grid input, .form-grid select { width: 100%; }
+    .check { display: flex; gap: .45rem; align-items: center; font-size: .88rem; margin-top: .5rem; }
+    /* curve board */
+    .board { display: grid; grid-template-columns: 17rem 1fr; gap: 1rem; align-items: start; }
+    @media (max-width: 900px) { .board { grid-template-columns: 1fr; } }
+    .plist { display: flex; flex-direction: column; gap: .3rem; }
+    .plist h4 { margin: .6rem 0 .1rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+    .plist h4:first-child { margin-top: 0; }
+    .pitem { text-align: left; display: flex; flex-direction: column; gap: .1rem; padding: .45rem .6rem; }
+    .pitem small { color: var(--muted); font-size: .72rem; }
+    .pitem.on { background: var(--sel-bg) !important; border-color: var(--text) !important; box-shadow: 0 0 0 1px var(--text) inset; color: var(--text) !important; }
+    .pitem.on small { color: var(--muted); }
+    .curve-wrap { position: relative; }
+    svg#curve { width: 100%; height: auto; display: block; touch-action: none; user-select: none; outline: none;
+                background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; }
+    svg#curve:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    .ctools { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: .6rem 0; }
+    .ptable { display: flex; flex-wrap: wrap; gap: .4rem; margin: .4rem 0 .2rem; }
+    .prow { display: flex; align-items: center; gap: .25rem; padding: .25rem .35rem; border: 1px solid var(--border);
+            border-radius: 10px; background: var(--panel2); }
+    .prow.sel { border-color: var(--text); box-shadow: 0 0 0 1px var(--text) inset; }
+    .prow input { width: 3.6rem; padding: .25rem .35rem; font-family: var(--mono); }
+    .prow span { font-size: .75rem; color: var(--muted); }
+    .prow button { padding: .15rem .45rem; }
+    .readout { font-family: var(--mono); }
+    .errs { color: var(--bad); font-size: .85rem; margin: .3rem 0; }
+    /* table */
+    .table-wrap { overflow-x: auto; }
+    @media (max-width: 640px) { label:has(> select) { display: block; max-width: 100%; } label > select { max-width: 100%; } }
+    td.num, th.num { text-align: right; font-family: var(--mono); }
+    td select { max-width: 15rem; }
+    .offs { display: inline-flex; align-items: center; gap: .3rem; font-family: var(--mono); }
+    .offs button { padding: .15rem .5rem; }
+    .dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; margin-right: .35rem; vertical-align: middle; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <header class="app">
+    <h1><span class="brand">Blake2b</span> ASIC Control</h1>
+    <div class="tabs">
+      <button type="button" onclick="location.href='/#fleet'">Fleet</button>
+      <button type="button" onclick="location.href='/#pools'">Pools</button>
+      <button type="button" class="active">Profiles</button>
+      <button type="button" onclick="location.href='/schedule.html'">Schedule</button>
+      <button type="button" onclick="location.href='/tuner.html'">Tuner</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="hdr-right">
+      <div class="row">
+        <button type="button" onclick="location.href='/#settings'">Settings</button>
+      </div>
+      <div class="row">
+        <span id="pausedNote" class="muted" style="font-size:.75rem"></span>
+        <button type="button" class="theme-btn" data-theme-toggle>☀ Light</button>
+        <button type="button" id="btnRefresh">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- MINER -->
+    <section class="panel compact">
+      <div class="minerbar">
+        <label class="muted">Miner <select id="minerSel"></select></label>
+        <span class="stat"><small>Hottest board</small><b id="stTemp">—</b></span>
+        <span class="stat"><small>Fans</small><b id="stFans">—</b></span>
+        <span class="stat"><small>Auto fan</small><b id="stAuto">—</b></span>
+        <span class="stat"><small>Preset</small><b id="stPreset">—</b></span>
+      </div>
+      <div class="row" style="gap:.6rem;margin-top:.6rem">
+        <span class="muted" style="font-size:.85rem">Detected as</span>
+        <span id="stHw" class="mono" style="font-size:.85rem">—</span>
+        <button type="button" id="btnProbe">Probe now</button>
+      </div>
+      <p class="hint" style="margin-bottom:0">Everything on this page is per miner: pick the miner here. Fan curves are a shared
+        list any miner can use; presets belong to the miner they were made for.</p>
+    </section>
+
+    <!-- PRESETS -->
+    <section class="panel" id="presetPanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Presets</h2>
+        <button type="button" id="btnNewPreset">+ New preset</button>
+      </div>
+      <p class="muted intro">A preset is a clock, voltage and PV plus the fan curve to run them with. The tuner builds
+        <b>High</b>, <b>Middle</b>, <b>Low</b> and <b>Lowest power</b> for each miner and tests every one with its own fan
+        curve (tick <i>Build presets</i> on the Tuner page). <b>Apply</b> puts the clock on the miner and switches its auto fan
+        to that curve.</p>
+      <div id="tuningNote" class="note warn hidden"></div>
+      <div class="pcards" id="pcards"></div>
+
+      <div id="presetForm" class="hidden" style="margin-top:1rem;border-top:1px solid var(--line);padding-top:.9rem">
+        <h3 id="pfTitle" style="margin:0 0 .6rem;font-size:.98rem">New preset</h3>
+        <div class="form-grid">
+          <label>Name<input id="pfLabel" maxlength="32" /></label>
+          <label>MHz<input id="pfMhz" type="number" step="25" /></label>
+          <label>mV<input id="pfMv" type="number" step="100" /></label>
+          <label>PV<input id="pfPv" type="number" step="50" /></label>
+          <label style="grid-column: span 2">Fan curve<select id="pfFan"></select></label>
+        </div>
+        <label class="check"><input type="checkbox" id="pfPvAuto" checked /> PV follows mV (keep the gap of <span id="pfGap">+300</span>)</label>
+        <div class="note warn" id="pfWarn">Clocks you type in are <b>not tested</b>. A clock or voltage the chips can't run
+          makes errors and can overheat the boards. Use the tuner to find safe settings; hand-set presets are marked
+          <i>not tested</i>.</div>
+        <div class="errs" id="pfErr"></div>
+        <div class="row" style="margin-top:.6rem">
+          <button type="button" class="primary" id="btnPfSave">Save preset</button>
+          <button type="button" id="btnPfCancel">Cancel</button>
+          <button type="button" class="danger hidden" id="btnPfDelete">Delete preset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CURVES -->
+    <section class="panel" id="curvePanel">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Fan curves</h2>
+        <span class="pill" id="dirtyPill">saved</span>
+      </div>
+      <p class="muted intro">The curve says how fast the fans run at each board temperature (the hottest board counts).
+        Drag a point to move it, click an empty spot to add one, double-click a point to remove it (or select it and press
+        Delete). Built-in curves can't be changed: press <b>Copy to edit</b>. The miner's own fan control slowly turns the fans
+        back down, so the dashboard re-sends the curve's value every few seconds.</p>
+      <div class="board">
+        <div class="plist" id="plist"></div>
+        <div>
+          <div class="row" style="gap:.6rem;margin-bottom:.5rem">
+            <input id="cvLabel" maxlength="48" style="flex:1;min-width:12rem;font-weight:600" />
+            <span class="pill" id="cvKind">curve</span>
+          </div>
+          <div class="curve-wrap">
+            <svg id="curve" viewBox="0 0 720 340" tabindex="0" role="img" aria-label="Fan curve: fan percent against board temperature"></svg>
+          </div>
+          <div class="ctools">
+            <span class="muted" style="font-size:.85rem">Try a temperature</span>
+            <input type="range" id="tryT" min="30" max="100" value="62" style="width:10rem" />
+            <span class="readout" id="tryOut">—</span>
+          </div>
+          <div id="editBlock">
+            <div class="ptable" id="ptable"></div>
+            <div class="row" style="gap:.5rem"><button type="button" id="btnAddPt">+ Add point</button>
+              <span class="muted" style="font-size:.8rem">2 to 8 points · fans 20-100 % · a curve can only stay level or rise</span></div>
+            <div class="form-grid" style="margin-top:.8rem">
+              <label>Safety temperature °C<input type="number" id="cvAbort" step="1" /></label>
+              <label>Re-send every (s)<input type="number" id="cvCool" step="5" /></label>
+              <label>Check temperature every (s)<input type="number" id="cvPoll" step="1" /></label>
+              <label>Smoothing<select id="cvSmooth"><option value="0">Off</option><option value="1">Light</option><option value="2">Strong</option></select></label>
+            </div>
+            <label class="check"><input type="checkbox" id="cvTc" checked /> Keep the miner's own temperature control on (recommended)</label>
+            <p class="hint"><b>Safety temperature:</b> at or above it the fans go to at least 90 % straight away, whatever the curve
+              says. <b>Re-send:</b> how often the value is sent again; the miner's own control walks the fans back in between.
+              <b>Smoothing:</b> follows the average of the last few readings so the fans don't hunt up and down; it never lets
+              the fan lag more than 10 % behind a rise. <b>Temperature control:</b> the miner's own protection; leaving it on is safer.</p>
+          </div>
+          <div class="errs" id="cvErr"></div>
+          <div class="row" style="margin-top:.4rem">
+            <button type="button" class="primary" id="btnCvSave">Save</button>
+            <button type="button" id="btnCvSaveAs">Save as new</button>
+            <button type="button" id="btnCvCopy">Copy to edit</button>
+            <button type="button" id="btnCvUndo">Undo changes</button>
+            <button type="button" class="danger" id="btnCvDelete">Delete</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AUTO FAN BY MINER -->
+    <section class="panel">
+      <h2 style="margin:0 0 .4rem">Auto fan by miner</h2>
+      <p class="muted intro">Each miner runs its own curve. Changes here take effect straight away. <i>Offset</i> adds or
+        takes away fan % on top of the curve for that miner only (handy for a miner in a hotter spot).</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Miner</th><th class="num">Hottest</th><th class="num">Fans RPM</th><th>Preset</th>
+            <th>Auto fan</th><th>Fan curve</th><th title="Which temperature the curve reads">Follows</th><th>Offset</th><th>Now</th></tr></thead>
+          <tbody id="mtable"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:.8rem">
+        <label class="muted">Curve for newly added miners <select id="defProfile"></select></label>
+        <button type="button" id="btnDefSave">Save</button>
+      </div>
+    </section>
+  </main>
+  <div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function toast(msg, err) {
+  const t = $("toast"); t.textContent = msg; t.className = "toast show" + (err ? " err" : "");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.className = "toast", 5000);
+}
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: {"Content-Type": "application/json"},
+                                body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { location.href = "/login.html?next=/profiles.html"; throw new Error("not signed in"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+const qs = new URLSearchParams(location.search);
+let S = null;                  // last /api/fans/state
+let minerId = qs.get("miner") || "";
+let cvKey = null;              // curve shown in the board
+let cv = null;                 // working copy of that curve
+let cvSaved = "";              // JSON of the saved version (for "unsaved")
+let selPt = -1;
+let pfKey = null;              // preset being edited ("" = new)
+const SLOTS = [["high","High"],["middle","Middle"],["low","Low"],["lowest","Lowest power"]];
+
+const miner = () => (S && S.miners.find(m => m.id === minerId)) || null;
+const fmtT = (t) => t == null ? "—" : `${Number(t).toFixed(0)} °C`;
+const profLabel = (k) => (S && S.profiles[k] && S.profiles[k].label) || k || "—";
+
+// ---------------------------------------------------------------- curve maths
+function pointsOf(p) {        // any profile -> list of {temp, fan} for drawing
+  const m = (p.mode || "steps").toLowerCase();
+  if (m === "curve") return (p.points || []).map(x => ({temp: +x.temp, fan: +x.fan}));
+  if (m === "smooth") return [{temp: +p.smooth_min_temp, fan: +p.smooth_min_fan}, {temp: +p.smooth_max_temp, fan: +p.smooth_max_fan}];
+  if (m === "single") return [{temp: +p.on_temp, fan: +p.kick_fan}];
+  return (p.steps || []).map(x => ({temp: +x.temp, fan: +x.fan}));
+}
+function fanAt(p, pts, t) {   // what the controller asks for at temperature t (null = leave the miner's own)
+  const m = (p.mode || "steps").toLowerCase();
+  if (m === "curve" || m === "smooth") {
+    if (!pts.length) return null;
+    if (t <= pts[0].temp) return pts[0].fan;
+    for (let i = 1; i < pts.length; i++) if (t <= pts[i].temp)
+      return pts[i-1].fan + (t - pts[i-1].temp) / Math.max(1e-6, pts[i].temp - pts[i-1].temp) * (pts[i].fan - pts[i-1].fan);
+    return pts[pts.length - 1].fan;
+  }
+  let f = null;                 // steps / single: nothing below the first step
+  for (const s of pts) if (t >= s.temp) f = s.fan;
+  return f;
+}
+function editable() { return cv && cv.mode === "curve" && !S.profiles[cvKey]?.builtin; }
+
+// ---------------------------------------------------------------- drawing
+const G = { w: 720, h: 340, l: 50, r: 18, t: 16, b: 42, tmin: 30, tmax: 100 };
+const X = (t) => G.l + (t - G.tmin) / (G.tmax - G.tmin) * (G.w - G.l - G.r);
+const Y = (f) => G.t + (100 - f) / 100 * (G.h - G.t - G.b);
+const invX = (px) => G.tmin + (px - G.l) / (G.w - G.l - G.r) * (G.tmax - G.tmin);
+const invY = (py) => 100 - (py - G.t) / (G.h - G.t - G.b) * 100;
+let hoverT = null;
+
+function drawCurve() {
+  const svg = $("curve");
+  if (!cv) { svg.innerHTML = ""; return; }
+  // draw at the size it is shown, so labels stay readable on a phone
+  const cw = Math.round(svg.getBoundingClientRect().width) || 720;
+  const w = Math.max(320, Math.min(720, cw)), hh = w < 520 ? 300 : 340;
+  if (G.w !== w || G.h !== hh) { G.w = w; G.h = hh; G.l = w < 520 ? 40 : 50; svg.setAttribute("viewBox", `0 0 ${w} ${hh}`); }
+  const pts = pointsOf(cv).sort((a, b) => a.temp - b.temp);
+  const mode = cv.mode || "steps";
+  let h = "";
+  // grid
+  for (let t = G.tmin; t <= G.tmax; t += 5) {
+    const major = t % 10 === 0;
+    h += `<line x1="${X(t)}" x2="${X(t)}" y1="${G.t}" y2="${G.h - G.b}" stroke="var(--line)" stroke-width="${major ? 1 : .5}" ${major ? "" : 'stroke-dasharray="2 4"'}/>`;
+    if (major) h += `<text x="${X(t)}" y="${G.h - G.b + 17}" text-anchor="middle" font-size="12" fill="var(--muted)">${t}</text>`;
+  }
+  for (let f = 0; f <= 100; f += 10) {
+    h += `<line x1="${G.l}" x2="${G.w - G.r}" y1="${Y(f)}" y2="${Y(f)}" stroke="var(--line)" stroke-width="${f % 20 ? .5 : 1}" ${f % 20 ? 'stroke-dasharray="2 4"' : ""}/>`;
+    if (f % 20 === 0) h += `<text x="${G.l - 8}" y="${Y(f) + 4}" text-anchor="end" font-size="12" fill="var(--muted)">${f}%</text>`;
+  }
+  h += `<text x="${(G.l + G.w - G.r) / 2}" y="${G.h - 6}" text-anchor="middle" font-size="12" fill="var(--muted)">hottest board °C</text>`;
+  // safety zone
+  const ab = Number(cv.abort_c || 90);
+  if (ab < G.tmax) {
+    h += `<rect x="${X(ab)}" y="${G.t}" width="${X(G.tmax) - X(ab)}" height="${G.h - G.t - G.b}" fill="var(--bad)" opacity=".12"/>`;
+    h += `<line x1="${X(ab)}" x2="${X(ab)}" y1="${G.t}" y2="${G.h - G.b}" stroke="var(--bad)" stroke-width="1.5"/>`;
+    h += `<text x="${X(ab) + 5}" y="${G.t + 14}" font-size="11" fill="var(--bad)">safety ${ab}°</text>`;
+  }
+  // the line the controller follows
+  const path = [];
+  if (mode === "curve" || mode === "smooth") {
+    if (pts.length) {
+      path.push([G.tmin, pts[0].fan]);
+      pts.forEach(p => path.push([p.temp, p.fan]));
+      path.push([G.tmax, pts[pts.length - 1].fan]);
+    }
+  } else {
+    pts.forEach((p, i) => {
+      const nxt = i + 1 < pts.length ? pts[i + 1].temp : G.tmax;
+      path.push([p.temp, p.fan], [nxt, p.fan]);
+    });
+  }
+  if (path.length) {
+    const d = path.map(([t, f], i) => `${i ? "L" : "M"}${X(Math.max(G.tmin, Math.min(G.tmax, t))).toFixed(1)},${Y(f).toFixed(1)}`).join(" ");
+    const first = path[0][0];
+    h += `<path d="${d} L${X(G.tmax)},${Y(0)} L${X(Math.max(G.tmin, first))},${Y(0)} Z" fill="var(--text)" opacity=".07"/>`;
+    h += `<path d="${d}" fill="none" stroke="var(--text)" stroke-width="2.5" stroke-linejoin="round"/>`;
+    if (mode !== "curve" && mode !== "smooth" && pts.length)
+      h += `<text x="${X(G.tmin) + 6}" y="${Y(8)}" font-size="11" fill="var(--muted)">below ${pts[0].temp}°: the miner's own fan control</text>`;
+  }
+  // miners on this page: where they are right now
+  const m = miner();
+  (S.miners || []).forEach(mm => {
+    const t = mm.live && mm.live.temp_max;
+    if (t == null) return;
+    const mine = mm.id === minerId;
+    const uses = (mm.fan_control || {}).profile === cvKey;
+    if (!mine && !uses) return;
+    const f = fanAt(cv, pts, t);
+    const x = X(Math.max(G.tmin, Math.min(G.tmax, t)));
+    h += `<line x1="${x}" x2="${x}" y1="${G.t}" y2="${G.h - G.b}" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+    if (f != null) h += `<circle cx="${x}" cy="${Y(f)}" r="5" fill="var(--ok)"/>`;
+    h += `<text x="${x + 5}" y="${G.h - G.b - 6}" font-size="11" fill="var(--ok)">${esc(mm.name)} ${t.toFixed(0)}°</text>`;
+  });
+  // hover crosshair
+  if (hoverT != null) {
+    const f = fanAt(cv, pts, hoverT);
+    const x = X(hoverT);
+    h += `<line x1="${x}" x2="${x}" y1="${G.t}" y2="${G.h - G.b}" stroke="var(--muted)" stroke-width="1"/>`;
+    if (f != null) {
+      h += `<circle cx="${x}" cy="${Y(f)}" r="4" fill="var(--muted)"/>`;
+      const right = x < G.w - 120;
+      h += `<text x="${right ? x + 8 : x - 8}" y="${Math.max(G.t + 14, Y(f) - 8)}" text-anchor="${right ? "start" : "end"}" font-size="12" fill="var(--text)">${hoverT.toFixed(0)} °C → ${Math.round(f)} %</text>`;
+    }
+  }
+  // points
+  const ed = editable();
+  pts.forEach((p, i) => {
+    const on = ed && i === selPt;
+    h += `<circle class="pt" data-i="${i}" cx="${X(p.temp)}" cy="${Y(p.fan)}" r="${ed ? 8 : 5}" fill="${on ? "var(--text)" : "var(--bg)"}"
+           stroke="var(--text)" stroke-width="2.5" style="cursor:${ed ? "grab" : "default"}"/>`;
+    if (ed) h += `<circle class="pt" data-i="${i}" cx="${X(p.temp)}" cy="${Y(p.fan)}" r="18" fill="transparent"/>`;
+  });
+  svg.innerHTML = h;
+  updateTry();
+}
+
+function updateTry() {
+  if (!cv) return;
+  const t = Number($("tryT").value);
+  const f = fanAt(cv, pointsOf(cv).sort((a, b) => a.temp - b.temp), t);
+  $("tryOut").textContent = f == null ? `${t} °C → the miner's own control` : `${t} °C → fan ${Math.round(f)} %`;
+}
+
+// ---------------------------------------------------------------- dragging
+function svgPoint(ev) {
+  const svg = $("curve"); const pt = svg.createSVGPoint();
+  pt.x = ev.clientX; pt.y = ev.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+function clampPoint(i, t, f) {
+  const P = cv.points;
+  const lo = i > 0 ? P[i-1].temp + 1 : 20, hi = i < P.length - 1 ? P[i+1].temp - 1 : 100;
+  const flo = Math.max(20, i > 0 ? P[i-1].fan : 20), fhi = Math.min(100, i < P.length - 1 ? P[i+1].fan : 100);
+  return [Math.round(Math.max(lo, Math.min(hi, t))), Math.round(Math.max(flo, Math.min(fhi, f)))];
+}
+let drag = -1;
+$("curve").addEventListener("pointerdown", (ev) => {
+  if (!editable()) return;
+  const p = svgPoint(ev);
+  const hit = ev.target.closest && ev.target.closest(".pt");
+  cv.points.sort((a, b) => a.temp - b.temp);
+  if (hit) {
+    drag = selPt = Number(hit.dataset.i);
+  } else {
+    if (p.x < G.l || p.x > G.w - G.r || p.y < G.t || p.y > G.h - G.b) return;
+    if (cv.points.length >= 8) { toast("A curve can have up to 8 points", true); return; }
+    const t = Math.round(invX(p.x));
+    if (cv.points.some(q => q.temp === t)) return;
+    cv.points.push({ temp: t, fan: Math.round(invY(p.y)) });
+    cv.points.sort((a, b) => a.temp - b.temp);
+    selPt = drag = cv.points.findIndex(q => q.temp === t);
+    const [ct, cf] = clampPoint(selPt, t, cv.points[selPt].fan);
+    cv.points[selPt] = { temp: ct, fan: cf };
+  }
+  $("curve").setPointerCapture(ev.pointerId);
+  $("curve").focus({ preventScroll: true });
+  changed();
+  ev.preventDefault();
+});
+$("curve").addEventListener("pointermove", (ev) => {
+  const p = svgPoint(ev);
+  if (drag >= 0 && editable()) {
+    const [t, f] = clampPoint(drag, invX(p.x), invY(p.y));
+    cv.points[drag] = { temp: t, fan: f };
+    hoverT = t;
+    changed(true);
+    return;
+  }
+  const t = invX(p.x);
+  hoverT = (p.x >= G.l && p.x <= G.w - G.r) ? Math.round(Math.max(G.tmin, Math.min(G.tmax, t))) : null;
+  drawCurve();
+});
+$("curve").addEventListener("pointerleave", () => { if (drag < 0) { hoverT = null; drawCurve(); } });
+const endDrag = () => { if (drag >= 0) { drag = -1; changed(); } };
+$("curve").addEventListener("pointerup", endDrag);
+$("curve").addEventListener("pointercancel", endDrag);
+$("curve").addEventListener("dblclick", (ev) => {
+  const hit = ev.target.closest && ev.target.closest(".pt");
+  if (hit && editable()) removePoint(Number(hit.dataset.i));
+});
+$("curve").addEventListener("keydown", (ev) => {
+  if (!editable() || selPt < 0 || selPt >= cv.points.length) return;
+  const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[ev.key];
+  if (d) {
+    const q = cv.points[selPt];
+    const [t, f] = clampPoint(selPt, q.temp + d[0], q.fan + d[1]);
+    cv.points[selPt] = { temp: t, fan: f };
+    changed(); ev.preventDefault();
+  } else if (ev.key === "Delete" || ev.key === "Backspace") { removePoint(selPt); ev.preventDefault(); }
+});
+function removePoint(i) {
+  if (cv.points.length <= 2) { toast("A curve needs at least 2 points", true); return; }
+  cv.points.splice(i, 1); selPt = Math.min(selPt, cv.points.length - 1); changed();
+}
+
+// ---------------------------------------------------------------- editor
+function validate() {
+  const errs = [];
+  if (!cv || cv.mode !== "curve") return errs;
+  const P = [...cv.points].sort((a, b) => a.temp - b.temp);
+  if (P.length < 2 || P.length > 8) errs.push("A curve needs 2 to 8 points.");
+  P.forEach(p => {
+    if (!(p.temp >= 20 && p.temp <= 100)) errs.push(`${p.temp} °C is outside 20-100 °C.`);
+    if (!(p.fan >= 20 && p.fan <= 100)) errs.push(`Fan ${p.fan} % is outside 20-100 %.`);
+  });
+  for (let i = 1; i < P.length; i++) {
+    if (P[i].temp === P[i-1].temp) errs.push(`Two points at ${P[i].temp} °C.`);
+    if (P[i].fan < P[i-1].fan) errs.push(`The fan drops from ${P[i-1].fan} % to ${P[i].fan} % as it gets hotter.`);
+  }
+  const ab = Number(cv.abort_c);
+  if (!(ab >= 70 && ab <= 95)) errs.push("Safety temperature must be 70-95 °C.");
+  else if (P.length && ab <= P[0].temp) errs.push("The safety temperature must be above the first point.");
+  if (!(Number(cv.cooldown_s) >= 15 && Number(cv.cooldown_s) <= 600)) errs.push("Re-send must be 15-600 s.");
+  if (!(Number(cv.poll_s) >= 5 && Number(cv.poll_s) <= 60)) errs.push("Check every must be 5-60 s.");
+  if (!String(cv.label || "").trim()) errs.push("Give the curve a name.");
+  return errs;
+}
+function dirty() { return cv && JSON.stringify(slim(cv)) !== cvSaved; }
+function slim(p) {
+  const o = { label: p.label, points: (p.points || []).map(x => ({ temp: +x.temp, fan: +x.fan })).sort((a, b) => a.temp - b.temp),
+              abort_c: +p.abort_c, cooldown_s: +p.cooldown_s, poll_s: +p.poll_s, smoothing: +(p.smoothing || 0),
+              force_tempcontrol_on: p.force_tempcontrol_on !== false };
+  return o;
+}
+function changed(fast) {
+  if (editable()) cv.points.sort((a, b) => a.temp - b.temp);
+  drawCurve();
+  if (fast) return;
+  renderPointTable();
+  const errs = validate();
+  $("cvErr").innerHTML = errs.map(esc).join("<br>");
+  const d = dirty();
+  $("dirtyPill").textContent = d ? "unsaved changes" : (editable() ? "saved" : "built-in");
+  $("dirtyPill").className = "pill" + (d ? " warn" : "");
+  $("btnCvSave").disabled = !editable() || !d || errs.length > 0;
+  $("btnCvSaveAs").disabled = cv.mode !== "curve" || errs.length > 0;
+  $("btnCvUndo").disabled = !d;
+}
+function renderPointTable() {
+  const ed = editable();
+  $("editBlock").classList.toggle("hidden", !cv || cv.mode !== "curve");
+  if (!cv || cv.mode !== "curve") return;
+  $("ptable").innerHTML = cv.points.map((p, i) => `
+    <div class="prow ${i === selPt && ed ? "sel" : ""}" data-i="${i}">
+      <input type="number" data-k="temp" value="${p.temp}" min="20" max="100" ${ed ? "" : "disabled"} /><span>°C</span>
+      <input type="number" data-k="fan" value="${p.fan}" min="20" max="100" ${ed ? "" : "disabled"} /><span>%</span>
+      ${ed ? `<button type="button" data-del="${i}" title="Remove this point">×</button>` : ""}
+    </div>`).join("");
+  $("ptable").querySelectorAll("input").forEach(el => {
+    el.addEventListener("focus", () => { selPt = Number(el.closest(".prow").dataset.i); drawCurve(); });
+    el.addEventListener("change", () => {
+      const i = Number(el.closest(".prow").dataset.i);
+      cv.points[i] = { ...cv.points[i], [el.dataset.k]: Math.round(Number(el.value)) };
+      selPt = i; changed();
+    });
+  });
+  $("ptable").querySelectorAll("[data-del]").forEach(b => b.onclick = () => removePoint(Number(b.dataset.del)));
+  for (const [id, k] of [["cvAbort", "abort_c"], ["cvCool", "cooldown_s"], ["cvPoll", "poll_s"]]) {
+    $(id).value = cv[k]; $(id).disabled = !ed;
+  }
+  $("cvSmooth").value = String(cv.smoothing || 0); $("cvSmooth").disabled = !ed;
+  $("cvTc").checked = cv.force_tempcontrol_on !== false; $("cvTc").disabled = !ed;
+  $("btnAddPt").disabled = !ed || cv.points.length >= 8;
+}
+for (const [id, k] of [["cvAbort", "abort_c"], ["cvCool", "cooldown_s"], ["cvPoll", "poll_s"]])
+  $(id).addEventListener("input", () => { cv[k] = Number($(id).value); changed(); });
+$("cvSmooth").onchange = () => { cv.smoothing = Number($("cvSmooth").value); changed(); };
+$("cvTc").onchange = () => { cv.force_tempcontrol_on = $("cvTc").checked; changed(); };
+$("cvLabel").addEventListener("input", () => { if (cv) { cv.label = $("cvLabel").value; changed(); } });
+$("btnAddPt").onclick = () => {
+  const P = cv.points; let gi = 0, gap = -1;
+  for (let i = 1; i < P.length; i++) if (P[i].temp - P[i-1].temp > gap) { gap = P[i].temp - P[i-1].temp; gi = i; }
+  if (gap < 2) { toast("No room for another point", true); return; }
+  const t = Math.round((P[gi-1].temp + P[gi].temp) / 2), f = Math.round((P[gi-1].fan + P[gi].fan) / 2);
+  P.splice(gi, 0, { temp: t, fan: f }); selPt = gi; changed();
+};
+$("tryT").oninput = updateTry;
+
+function openCurve(key, force) {
+  if (!force && dirty() && key !== cvKey && !confirm("Leave this curve without saving your changes?")) return false;
+  const p = S.profiles[key];
+  if (!p) return false;
+  cvKey = key;
+  cv = JSON.parse(JSON.stringify(p));
+  if (cv.mode === "curve") cv.points = pointsOf(cv).sort((a, b) => a.temp - b.temp);
+  cvSaved = JSON.stringify(slim(cv));
+  selPt = -1;
+  const ed = editable();
+  $("cvLabel").value = cv.label || key; $("cvLabel").disabled = !ed;
+  const kinds = { curve: "curve", steps: "steps (stock)", single: "single kick (stock)", smooth: "smooth ramp (stock)" };
+  $("cvKind").textContent = (p.builtin ? "built-in · " : p.tuned ? "made by the tuner · " : "yours · ") + (kinds[cv.mode] || cv.mode);
+  $("btnCvCopy").classList.toggle("hidden", ed);
+  $("btnCvSave").classList.toggle("hidden", !ed);
+  $("btnCvSaveAs").classList.toggle("hidden", !ed);
+  $("dirtyPill").classList.toggle("hidden", !ed);
+  $("btnCvDelete").classList.toggle("hidden", !ed);
+  $("btnCvUndo").classList.toggle("hidden", !ed);
+  renderList();
+  changed();
+  return true;
+}
+function renderList() {
+  const groups = [["Yours", k => !S.profiles[k].builtin && !S.profiles[k].tuned],
+                  ["Made by the tuner", k => S.profiles[k].tuned],
+                  ["Built-in curves", k => S.profiles[k].builtin && S.profiles[k].mode === "curve"],
+                  ["Stock profiles", k => S.profiles[k].builtin && S.profiles[k].mode !== "curve"]];
+  const users = {};
+  (S.miners || []).forEach(m => { const k = (m.fan_control || {}).profile; if (m.fan_control && m.fan_control.enabled) (users[k] = users[k] || []).push(m.name); });
+  let h = "";
+  for (const [title, test] of groups) {
+    const keys = Object.keys(S.profiles).filter(test);
+    if (!keys.length) continue;
+    h += `<h4>${title}</h4>`;
+    for (const k of keys) {
+      const u = users[k];
+      h += `<button type="button" class="pitem ${k === cvKey ? "on" : ""}" data-k="${esc(k)}">${esc(S.profiles[k].label || k)}
+             <small>${u ? "on " + esc(u.join(", ")) : "not in use"}${S.defaults.profile === k ? " · default" : ""}</small></button>`;
+    }
+  }
+  $("plist").innerHTML = h;
+  $("plist").querySelectorAll(".pitem").forEach(b => b.onclick = () => openCurve(b.dataset.k));
+}
+async function saveCurve(asNew) {
+  const errs = validate();
+  if (errs.length) { toast(errs[0], true); return; }
+  const body = slim(cv);
+  if (!asNew) body.key = cvKey;
+  else if (body.label === (S.profiles[cvKey] || {}).label) body.label = (body.label + " (copy)").slice(0, 48);
+  try {
+    const j = await api("POST", "/api/fans/profile", body);
+    toast(asNew ? `Saved as "${j.profile.label}"` : "Curve saved");
+    await load();
+    openCurve(j.key, true);
+  } catch (e) { toast(e.message, true); }
+}
+$("btnCvSave").onclick = () => saveCurve(false);
+$("btnCvSaveAs").onclick = () => saveCurve(true);
+$("btnCvUndo").onclick = () => openCurve(cvKey, true);
+$("btnCvCopy").onclick = () => {
+  // turn any profile into an editable curve
+  const src = S.profiles[cvKey];
+  let pts = pointsOf(src).sort((a, b) => a.temp - b.temp);
+  if (src.mode === "single") pts = [{ temp: pts[0].temp - 10, fan: 40 }, pts[0]];
+  if (pts.length < 2) pts = [{ temp: 55, fan: 40 }, { temp: 75, fan: 90 }];
+  pts = pts.map(p => ({ temp: Math.round(Math.max(20, Math.min(100, p.temp))), fan: Math.round(Math.max(20, Math.min(100, p.fan))) }));
+  cv = { mode: "curve", label: ((src.label || cvKey) + " (copy)").slice(0, 48), points: pts,
+         abort_c: Math.min(95, Math.max(70, Number(src.abort_c || 88))), cooldown_s: Number(src.cooldown_s || 45),
+         poll_s: Math.max(5, Number(src.poll_s || 10)), smoothing: src.mode === "smooth" ? 1 : Number(src.smoothing || 0),
+         force_tempcontrol_on: true };
+  saveCurve(true);
+};
+$("btnCvDelete").onclick = async () => {
+  if (!confirm(`Delete the curve "${cv.label}"?`)) return;
+  try { await api("POST", "/api/fans/profile_delete", { key: cvKey }); toast("Curve deleted"); cvKey = null; await load(); }
+  catch (e) { toast(e.message, true); }
+};
+
+// ---------------------------------------------------------------- presets
+function spark(pkey) {
+  const p = S.profiles[pkey]; if (!p) return "";
+  const pts = pointsOf(p).sort((a, b) => a.temp - b.temp); if (!pts.length) return "";
+  const x = (t) => (t - 30) / 70 * 200, y = (f) => 36 - f / 100 * 34;
+  let d = `M0,${y(pts[0].fan)} ` + pts.map(q => `L${x(q.temp).toFixed(1)},${y(q.fan).toFixed(1)}`).join(" ") + ` L200,${y(pts[pts.length - 1].fan)}`;
+  return `<svg viewBox="0 0 200 38" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="var(--muted)" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function renderPresets() {
+  const m = miner();
+  const box = $("pcards");
+  if (!m) { box.innerHTML = `<p class="muted">Add a miner under Settings first.</p>`; return; }
+  $("tuningNote").classList.toggle("hidden", !m.tuning);
+  $("tuningNote").innerHTML = m.tuning ? `A tuning run is going on <b>${esc(m.name)}</b>${m.tuner_fans ? " and it is holding the fans" : ""}.
+     Presets can be applied when it ends; new ones it builds appear here then. <a href="/tuner.html?miner=${encodeURIComponent(m.id)}">Open the tuner</a>` : "";
+  const ps = m.presets || {};
+  const keys = [...SLOTS.map(s => s[0]), ...Object.keys(ps).filter(k => !SLOTS.some(s => s[0] === k) && k !== "idle"), ...(ps.idle ? ["idle"] : [])];
+  box.innerHTML = keys.map(k => {
+    const p = ps[k]; const slot = SLOTS.find(s => s[0] === k);
+    if (!p) return `<div class="pcard empty"><h3>${slot[1]}</h3>
+        <div class="meta">Not built yet. Run a search on the Tuner page with <i>Build presets</i> ticked.</div>
+        <div class="acts"><a href="/tuner.html?miner=${encodeURIComponent(m.id)}"><button type="button">Tuner</button></a></div></div>`;
+    const active = m.active_preset === k;
+    if (p.idle) return `<div class="pcard ${active ? "active" : ""}">
+      <h3>☾ Idle ${active ? '<span class="pill ok">on the miner</span>' : ""}</h3>
+      <div class="clock">not hashing</div>
+      <div class="meta">The firmware's own Idle mode (the same as Idle on the miner's own Miner settings page): the hash boards
+        stop and draw little power. Any other preset wakes it. A schedule can use it too, for example for expensive hours.</div>
+      <div class="acts"><button type="button" class="primary" data-apply="${esc(k)}" ${m.tuning ? "disabled" : ""}>${active ? "Apply again" : "Apply"}</button></div></div>`;
+    const bad = p.ok === false;
+    const tested = p.source === "tuner"
+      ? (bad ? `<span style="color:var(--bad)">Didn't pass: ${esc(p.reason || "failed")}</span>`
+             : `Clean for ${p.watched_min ?? "?"} min${p.target_c != null ? ` at ${p.target_c} °C` : ""}${p.avg_fan != null ? ` · fans ${p.avg_fan} %` : ""}${p.avg_ths ? ` · ${Number(p.avg_ths).toFixed(2)} TH/s` : ""}${p.tested ? `<br>tested ${esc(p.tested)}` : ""}`)
+      : `<span style="color:var(--warn)">Set by hand, not tested</span>`;
+    return `<div class="pcard ${active ? "active" : ""} ${bad ? "failed" : ""}">
+      <h3>${esc(p.label || k)} ${active ? '<span class="pill ok">on the miner</span>' : ""}</h3>
+      <div class="clock">${p.mhz} MHz</div>
+      <div class="sub">${p.mv} mV · PV ${p.pv}${Math.floor(p.mhz / 12.5) * 12.5 !== p.mhz ? ` · runs ${Math.floor(p.mhz / 12.5) * 12.5} MHz` : ""}</div>
+      ${p.power ? `<div class="meta" title="Estimate: chips follow clock × PV² (PV is the real board voltage). Calibrate it on the Miner page.">≈ ${p.power.w} W · ${p.power.amps} A${p.power.w_per_th ? ` · ${p.power.w_per_th} W/TH` : ""}</div>` : ""}
+      <div class="meta">${!p.fan_profile ? "Fans: left as they are" : S.profiles[p.fan_profile] && S.profiles[p.fan_profile].tuned
+        ? `Fans: its own tuned curve${p.target_c != null ? ` (holds about ${p.target_c} °C)` : ""}` : "Fans: " + esc(profLabel(p.fan_profile))}</div>
+      ${p.fan_profile ? spark(p.fan_profile) : ""}
+      <div class="meta">${tested}</div>
+      ${p.rebuild_failed ? `<div class="meta" style="color:var(--warn)">A rebuild${p.rebuild_failed.target_c != null ? ` at ${esc(p.rebuild_failed.target_c)} °C` : ""} (${esc(p.rebuild_failed.tested || "")}) didn't pass${p.rebuild_failed.reason ? `: ${esc(p.rebuild_failed.reason)}` : ""}, so this one was kept.</div>` : ""}
+      <div class="acts">
+        <button type="button" class="primary" data-apply="${esc(k)}" ${bad || m.tuning ? "disabled" : ""}>${active ? "Apply again" : "Apply"}</button>
+        <button type="button" data-edit="${esc(k)}">Edit</button>
+      </div></div>`;
+  }).join("");
+  box.querySelectorAll("[data-apply]").forEach(b => b.onclick = () => applyPreset(b.dataset.apply));
+  box.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editPreset(b.dataset.edit));
+}
+async function applyPreset(k) {
+  const m = miner(); const p = m.presets[k];
+  const msg = p.idle ? `Put ${m.name} in Idle?\n\nIt stops hashing until you pick another preset (or its schedule does).` : `Put ${p.label} on ${m.name}?\n\n${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}` +
+    (p.fan_profile ? `\nFans: ${profLabel(p.fan_profile)} (auto fan on)` : "\nFans: left as they are") +
+    (p.source !== "tuner" ? "\n\nThis preset was set by hand and hasn't been tested." : "");
+  if (!confirm(msg)) return;
+  try { await api("POST", "/api/presets/apply", { miner_id: m.id, key: k }); toast(`${p.label} is on ${m.name}`); await load(); }
+  catch (e) { toast(e.message, true); }
+}
+function fanOptions(sel) {
+  return `<option value="">Leave the fans as they are</option>` + Object.keys(S.profiles)
+    .map(k => `<option value="${esc(k)}" ${k === sel ? "selected" : ""}>${esc(S.profiles[k].label || k)}</option>`).join("");
+}
+let pfGap = 300;
+function editPreset(k) {
+  const m = miner(); if (!m) return;
+  pfKey = k || "";
+  const p = k ? m.presets[k] : null;
+  const any = Object.values(m.presets || {})[0];
+  const stock = (m.hardware && m.hardware.stock) || { mhz: 625, mv: 9100, pv: 9400 };   // from the probe
+  pfGap = p ? p.pv - p.mv : (any ? any.pv - any.mv : stock.pv - stock.mv);
+  $("pfTitle").textContent = p ? `Edit ${p.label}` : `New preset for ${m.name}`;
+  $("pfLabel").value = p ? p.label : "";
+  $("pfMhz").value = p ? p.mhz : (any ? any.mhz : stock.mhz);
+  $("pfMv").value = p ? p.mv : (any ? any.mv : stock.mv);
+  $("pfPv").value = p ? p.pv : Number($("pfMv").value) + pfGap;
+  $("pfFan").innerHTML = fanOptions(p ? p.fan_profile : "");
+  $("pfGap").textContent = (pfGap >= 0 ? "+" : "") + pfGap;
+  $("pfPvAuto").checked = true; $("pfPv").disabled = true;
+  $("btnPfDelete").classList.toggle("hidden", !p);
+  $("pfErr").textContent = "";
+  $("presetForm").classList.remove("hidden");
+  $("presetForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("pfLabel").focus();
+}
+$("pfMv").addEventListener("input", () => { if ($("pfPvAuto").checked) $("pfPv").value = Number($("pfMv").value) + pfGap; });
+$("pfPvAuto").onchange = () => { $("pfPv").disabled = $("pfPvAuto").checked; if ($("pfPvAuto").checked) $("pfPv").value = Number($("pfMv").value) + pfGap; };
+$("btnNewPreset").onclick = () => editPreset("");
+$("btnPfCancel").onclick = () => { $("presetForm").classList.add("hidden"); pfKey = null; };
+$("btnPfSave").onclick = async () => {
+  const m = miner();
+  const body = { miner_id: m.id, key: pfKey || undefined, label: $("pfLabel").value.trim(), mhz: Number($("pfMhz").value),
+                 mv: Number($("pfMv").value), pv: Number($("pfPv").value), fan_profile: $("pfFan").value || null };
+  try {
+    await api("POST", "/api/presets/save", body);
+    toast("Preset saved"); $("presetForm").classList.add("hidden"); pfKey = null; await load();
+  } catch (e) { $("pfErr").textContent = e.message; }
+};
+$("btnPfDelete").onclick = async () => {
+  const m = miner(); if (!confirm(`Delete the preset ${m.presets[pfKey].label}?`)) return;
+  try { await api("POST", "/api/presets/delete", { miner_id: m.id, key: pfKey }); toast("Preset deleted");
+        $("presetForm").classList.add("hidden"); pfKey = null; await load(); }
+  catch (e) { toast(e.message, true); }
+};
+
+// ---------------------------------------------------------------- miners
+function nowText(m) {
+  if (m.tuner_fans) return "tuner is holding the fans";
+  const rt = m.runtime || {}; const s = String(rt.last_status || "");
+  if (!(m.fan_control || {}).enabled) return "auto fan off";
+  if (!s || s === "init") return "starting…";
+  if (s.startsWith("ERROR")) return `<span style="color:var(--bad)">${esc(s.slice(6, 80))}</span>`;
+  const f = /fan=(\d+)/.exec(s), t = /temp=([\d.]+)/.exec(s);
+  if (s.startsWith("ABORT")) return `<span style="color:var(--bad)">too hot: fan ${f ? f[1] : "?"} %</span>`;
+  if (s.startsWith("IDLE")) return "cool: miner's own control";
+  if (s.startsWith("COOLDOWN")) return `fan ${f ? f[1] : "?"} %${t ? ` at ${Number(t[1]).toFixed(0)} °C` : ""}`;
+  if (f) return `fan ${f[1]} %${t ? ` at ${Number(t[1]).toFixed(0)} °C` : ""}`;
+  return esc(s.slice(0, 60));
+}
+function renderMiners() {
+  const tb = $("mtable");
+  if (tb.contains(document.activeElement) && document.activeElement.tagName === "SELECT") return;  // don't close an open list
+  const opts = (sel) => Object.keys(S.profiles).map(k => `<option value="${esc(k)}" ${k === sel ? "selected" : ""}>${esc(S.profiles[k].label || k)}</option>`).join("");
+  tb.innerHTML = (S.miners || []).map(m => {
+    const fc = m.fan_control || {}; const lv = m.live || {};
+    const ps = (m.presets || {})[m.active_preset];
+    return `<tr>
+      <td><a href="?miner=${encodeURIComponent(m.id)}" data-pick="${esc(m.id)}"><span class="dot" style="background:${lv.online ? "var(--ok)" : "var(--bad)"}"></span>${esc(m.name)}</a><div class="muted mono" style="font-size:.72rem">${esc(m.ip)}</div></td>
+      <td class="num">${fmtT(lv.temp_max)}</td>
+      <td class="num">${(lv.fan_rpm || []).length ? esc(lv.fan_rpm.join(" / ")) : "—"}</td>
+      <td>${ps ? esc(ps.label) : '<span class="muted">—</span>'}</td>
+      <td><label class="check" style="margin:0"><input type="checkbox" data-en="${esc(m.id)}" ${fc.enabled ? "checked" : ""} ${m.tuner_fans ? "disabled" : ""}/> on</label></td>
+      <td><select data-prof="${esc(m.id)}">${opts(fc.profile)}</select></td>
+      <td><select data-src="${esc(m.id)}" title="The board sensor reads cooler than the chips; following the hottest chip adds the difference the miner's log shows">
+        <option value="board" ${(fc.temp_source || "board") === "board" ? "selected" : ""}>board sensor</option>
+        <option value="chip" ${fc.temp_source === "chip" ? "selected" : ""}>hottest chip${m.chip_offset != null ? ` (+${m.chip_offset.toFixed(1)} °C)` : ""}</option></select></td>
+      <td><span class="offs"><button type="button" data-off="${esc(m.id)}" data-d="-5">−</button><span>${(fc.fan_offset || 0) > 0 ? "+" : ""}${fc.fan_offset || 0}%</span><button type="button" data-off="${esc(m.id)}" data-d="5">+</button></span></td>
+      <td>${nowText(m)}</td></tr>`;
+  }).join("") || `<tr><td colspan="9" class="muted">No miners yet. Add one under Settings.</td></tr>`;
+  tb.querySelectorAll("[data-pick]").forEach(a => a.onclick = (e) => { e.preventDefault(); pickMiner(a.dataset.pick); });
+  tb.querySelectorAll("[data-en]").forEach(el => el.onchange = () => setFc(el.dataset.en, { enabled: el.checked }));
+  tb.querySelectorAll("[data-prof]").forEach(el => el.onchange = () => setFc(el.dataset.prof, { profile: el.value }));
+  tb.querySelectorAll("[data-src]").forEach(el => el.onchange = async () => {
+    try { const r = await api("POST", "/api/fans/temp_source", { miner_id: el.dataset.src, source: el.value });
+          toast(el.value === "chip" ? (r.offset != null ? `Curve follows the hottest chip (+${r.offset.toFixed(1)} °C)` : "Curve will follow the hottest chip once its log has been read (open its Miner page)") : "Curve follows the board sensor"); }
+    catch (e) { toast(e.message, true); }
+    await load();
+  });
+  tb.querySelectorAll("[data-off]").forEach(el => el.onclick = () => {
+    const m = S.miners.find(x => x.id === el.dataset.off);
+    const v = Math.max(-40, Math.min(40, Number((m.fan_control || {}).fan_offset || 0) + Number(el.dataset.d)));
+    setFc(m.id, { fan_offset: v });
+  });
+  $("defProfile").innerHTML = opts(S.defaults.profile || "steps-default");
+}
+async function setFc(id, body) {
+  try { await api("POST", `/api/miners/${encodeURIComponent(id)}/fan_control`, body); toast("Saved"); }
+  catch (e) { toast(e.message, true); }
+  await load();
+}
+$("btnDefSave").onclick = async () => {
+  try { await api("POST", "/api/fan/defaults", { profile: $("defProfile").value }); toast("Default saved"); await load(); }
+  catch (e) { toast(e.message, true); }
+};
+
+// ---------------------------------------------------------------- page
+function pickMiner(id) {
+  minerId = id;
+  history.replaceState(null, "", "?miner=" + encodeURIComponent(id));
+  $("minerSel").value = id;
+  $("presetForm").classList.add("hidden"); pfKey = null;
+  renderAll();
+}
+$("minerSel").onchange = () => pickMiner($("minerSel").value);
+$("btnProbe").onclick = async () => {
+  const m = miner(); if (!m) return;
+  $("btnProbe").disabled = true; $("stHw").textContent = "probing… (up to about 30 s)";
+  try { const j = await api("POST", "/api/hardware/probe", { miner_id: m.id }); toast(j.hardware.ok ? "Probed: " + j.line : "Probe failed: " + j.line, !j.hardware.ok); }
+  catch (e) { toast(e.message, true); }
+  finally { $("btnProbe").disabled = false; load(); }
+};
+
+function renderHeader() {
+  const sel = $("minerSel");
+  const want = (S.miners || []).map(m => m.id).join("|");
+  if (sel.dataset.ids !== want) {
+    sel.innerHTML = (S.miners || []).map(m => `<option value="${esc(m.id)}">${esc(m.name)} (${esc(m.ip)})</option>`).join("");
+    sel.dataset.ids = want;
+  }
+  if (!miner() && S.miners.length) minerId = S.miners[0].id;
+  sel.value = minerId;
+  const m = miner();
+  const lv = (m && m.live) || {};
+  $("stTemp").textContent = fmtT(lv.temp_max);
+  $("stFans").textContent = (lv.fan_rpm || []).length ? `${Math.max(...lv.fan_rpm)} RPM` : (lv.online === false ? "offline" : "—");
+  const fc = (m && m.fan_control) || {};
+  $("stAuto").textContent = !m ? "—" : m.tuner_fans ? "tuner" : fc.enabled ? profLabel(fc.profile).replace(/^Curve: /, "") : "off";
+  const ap = m && (m.presets || {})[m.active_preset];
+  $("stPreset").textContent = ap ? ap.label : "—";
+  const hw = m && m.hardware;
+  $("stHw").textContent = !m ? "—" : m.probing ? "probing…" : m.hardware_line || "not probed yet";
+  $("stHw").style.color = hw && hw.ok ? "var(--text)" : "var(--warn)";
+  $("btnProbe").textContent = hw && hw.ok ? "Probe again" : "Probe now";
+}
+function renderAll() {
+  renderHeader();
+  if (pfKey === null) renderPresets();
+  renderMiners();
+  if (!cvKey || !S.profiles[cvKey]) {
+    const m = miner();
+    const k = ((m && m.fan_control) || {}).profile;
+    openCurve(k && S.profiles[k] ? k : "curve-60", true);
+  } else { renderList(); drawCurve(); }
+}
+async function load() {
+  try { S = await api("GET", "/api/fans/state"); renderAll(); }
+  catch (e) { toast("Couldn't load: " + e.message, true); }
+}
+$("btnRefresh").onclick = load;
+document.addEventListener("themechange", drawCurve);
+window.addEventListener("resize", () => { clearTimeout(drawCurve._r); drawCurve._r = setTimeout(drawCurve, 120); });
+window.addEventListener("beforeunload", (e) => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+load();
+// live temperatures: every 15 s (the editor and the preset form are never touched)
+setInterval(() => { if (!document.hidden && drag < 0) load(); }, 15000);
+</script>
+</body>
+</html>
