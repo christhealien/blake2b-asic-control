@@ -130,7 +130,11 @@ HW_SCRIPT = """  <script>(() => {
       const sh = h.share;
       const rj = h.rejects;
       if (rj && rj.day && rj.day.other) bits.push(`<span style="color:var(--bad);font-weight:600" title="A share the pool refused for a reason other than stale (Miner page for the details)">${rj.day.other} rejected share${rj.day.other > 1 ? "s" : ""} NOT stale${rj.other_last ? ` (${esc(rj.other_last.slice(11, 16))})` : ""}</span>`);
-      if (sh && (sh.now || sh.record)) bits.push(`<span style="color:var(--muted)" title="Best share since the miner last restarted, and the best ever seen (Miner page for the history)">Best share <b style="color:var(--text)">${esc(sh.now_text)}</b>${sh.record && sh.record > sh.now ? ` · record ${esc(sh.record_text)}` : ""}</span>`);
+      if (sh && (sh.now || sh.record)) bits.push(sh.scale === "both"
+        // Settings -> Best share numbers -> Both: the two numbers each are long, so best share and record get a line
+        // each, their values lined up in one column
+        ? `<span style="display:inline-grid;grid-template-columns:auto auto;column-gap:.6em;color:var(--muted)" title="Best share since the miner last restarted, and the best ever seen (Miner page for the history)"><span>Best share</span><b style="color:var(--text)">${esc(sh.now_text)}</b>${sh.record && sh.record > sh.now ? `<span>Record</span><span>${esc(sh.record_text)}</span>` : ""}</span>`
+        : `<span style="color:var(--muted)" title="Best share since the miner last restarted, and the best ever seen (Miner page for the history)">Best share <b style="color:var(--text)">${esc(sh.now_text)}</b>${sh.record && sh.record > sh.now ? ` · record ${esc(sh.record_text)}` : ""}</span>`);
       return "<br>" + bits.join("<br>");
     };
     const load = () => fetch("/api/hardware/list").then(r => r.ok ? r.json() : null)

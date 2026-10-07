@@ -8,6 +8,13 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.7 (2026-10-07)
+
+- **Fleet card, Best share numbers → Both:** best share and record on a line each, the numbers in one column
+  (an inline grid), instead of "Best share 8.98P (2.09 M) · record 5.99E (1.4 G)" wrapping with the record's
+  numbers pushed onto a ragged second line. The other two choices keep the single line. The shares card in
+  `/api/hardware/list` and `/api/hardware/shares` gains `scale`, so the card knows which one is picked.
+
 ## 1.15.6 (2026-10-07)
 
 - **Settings → Best share numbers** (`/api/settings/share_scale`, GET and POST; `share_scale` in

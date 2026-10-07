@@ -248,7 +248,7 @@ def card(entry: dict[str, Any] | None) -> dict[str, Any] | None:
                          "rank": hist.index(h) + 1, "record": h is top,
                          "current": h.get("sid") == s.get("sid") and h.get("best") == s.get("best")}
                         for h in hist],                    # the table: biggest first
-            "reset_at": entry.get("reset_at")}
+            "reset_at": entry.get("reset_at"), "scale": _scale[0]}
 
 
 def all_cards() -> dict[str, Any]:
