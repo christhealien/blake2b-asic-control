@@ -8,6 +8,16 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.3 (2026-10-07)
+
+- **For the StartOS package** (no change on Umbrel):
+  - `python auth_addon.py set-login USERNAME` sets or replaces the login with the password read from
+    stdin (never an argument: arguments show in process lists). The same checks as the page (1-64
+    characters, no spaces; a password of 8 or more), only the salted PBKDF2 hash is written, and
+    everyone is signed out. StartOS's "Set login password" action runs it with the service stopped.
+  - `B2AC_PLATFORM=startos` shows "First time? Sign in as admin with the password from StartOS:
+    Actions → Set login password" on the sign-in page (`/api/auth/status` gains `platform`).
+
 ## 1.15.2 (2026-10-07)
 
 - **Hashrate graphs: a scale on both sides** (Fleet card and Miner page). Round levels 1, 2, 2.5 or 5

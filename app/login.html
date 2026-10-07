@@ -62,6 +62,9 @@
       <h2>Sign in</h2>
       <p class="muted hidden" id="umbrelHint" style="font-size:.85rem;margin-top:0">First time? Use the default
         username and password that Umbrel shows for this app. You can change them afterwards under Settings → Account.</p>
+      <p class="muted hidden" id="startosHint" style="font-size:.85rem;margin-top:0">First time? Sign in as
+        <b>admin</b> with the password from StartOS: this service's <b>Actions → Set login password</b>. You can change
+        it afterwards under Settings → Account.</p>
       <form id="loginForm" autocomplete="on">
         <label>Username<input name="username" autocomplete="username" required /></label>
         <label>Password<input name="password" type="password" autocomplete="current-password" required /></label>
@@ -194,6 +197,7 @@ async function init() {
   else if (!s.user) {
     show("loginPanel");
     $("umbrelHint").classList.toggle("hidden", !s.umbrel_default);
+    $("startosHint").classList.toggle("hidden", s.platform !== "startos");
     showDisclaimer("gate", () => document.querySelector("#loginForm input").focus());
   }
   else if (!s.ack_ok) {

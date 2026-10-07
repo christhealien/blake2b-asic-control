@@ -313,6 +313,7 @@ def _auth_api(handler: Any, path: str, method: str) -> None:
         user = _user(handler)
         return _json(handler, 200, {"ok": True, "has_account": has_account(), "user": user,
                                     "umbrel_default": bool(os.environ.get("SCLITE_WEBUI_DEFAULT_USER")),
+                                    "platform": (os.environ.get("B2AC_PLATFORM") or "")[:20],
                                     "disclaimer_version": DISCLAIMER_VERSION,
                                     "last_ack": _last_ack(user) if user else None,
                                     "ack_ok": bool(user) and _ack_ok(user)})
@@ -404,3 +405,23 @@ def _auth_api(handler: Any, path: str, method: str) -> None:
         return _json(handler, 200, {"ok": True}, _cookie(token, SESSION_DAYS * 86400))
 
     return _json(handler, 404, {"ok": False, "error": "unknown"})
+
+
+# ---------------------------------------------------------------- command line ---
+# Set (or replace) the login from the command line, for a platform that makes the password itself (StartOS's
+# "Set login password" action runs this with the service stopped). The password comes on stdin, never as an
+# argument (arguments show up in process lists); only its salted hash is written. Signs everyone out.
+#   echo -n 'the password' | python auth_addon.py set-login admin
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) == 3 and sys.argv[1] == "set-login":
+        name, secret = sys.argv[2].strip(), sys.stdin.read().rstrip("\r\n")
+        problem = _valid(name, secret)
+        if problem:
+            print(f"not set: {problem}", file=sys.stderr)
+            sys.exit(2)
+        _set_account(name, secret)
+        print(f"login set for {name}; everyone is signed out")
+        sys.exit(0)
+    print("usage: python auth_addon.py set-login USERNAME   (the password on stdin)", file=sys.stderr)
+    sys.exit(2)
