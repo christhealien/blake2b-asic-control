@@ -15,8 +15,9 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   for the miners you tick.
 - **Miner page:** live stats, the same 24-hour graph, a **chip map** of every chip on the hash boards
   (shaded by bad results, HW errors or speed, with weak chips flagged), each board's temperatures and
-  voltage, the **best share** (with a record that survives restarts) and **rejected shares** sorted
-  into stale (pool timing, harmless) and not stale (worth a look).
+  voltage, the **best share** (with a record that survives restarts, on the same scale as DATUM and
+  mempool so you can compare it with the network difficulty; or the miner's own number, or both) and
+  **rejected shares** sorted into stale (pool timing, harmless) and not stale (worth a look).
 - **Presets:** High, Middle, Low and Lowest power per miner: a clock, voltage, PV and the fan curve to
   run them with. **Idle** puts an SC Lite in the firmware's own sleep mode. One click applies a preset.
 - **Fan curves:** drag the points of a curve (hottest board or chip → fan %); each miner runs its own,
@@ -31,7 +32,7 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
 - **Notifications** on Telegram or Discord: a miner offline, too hot, low hashrate, restarted on its
   own, a scheduled change that failed, a tuning run finished, a new best-share record, a weak chip, a
   share rejected for a reason other than stale. Each kind and each miner on or off.
-- **Pools** on several miners at once, **Settings** (account, time zone, notifications, a Miner
+- **Pools** on several miners at once, **Settings** (account, time zone, best share numbers, notifications, a Miner
   reference explaining the miner's settings, web API, debug pages and port 4028 commands), Light and
   Dark themes, a phone layout and two Umbrel home-screen widgets.
 
@@ -114,7 +115,7 @@ Everything that changes is in the app's data folder (on Umbrel
 
 - `miners.json`: your miners and what each was detected as (including its stock setting), their
   auto-fan settings, fan curves (`profiles`), presets (`presets`), schedules (`schedules`), power
-  calibrations (`power_cal`), mains voltage (`power`), notifications (`notify`) and the time zone.
+  calibrations (`power_cal`), mains voltage (`power`), notifications (`notify`), the time zone and how best shares are shown (`share_scale`).
 - `auth.json`: the login (hashed) and a log of disclaimer acknowledgements. It's first created from
   Umbrel's default login for the app. Delete it and restart the app to go back to that default.
 - `sessions.json`: who is signed in.

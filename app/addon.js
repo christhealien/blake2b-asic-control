@@ -593,8 +593,8 @@
         <p class="muted" style="font-size:.78rem;margin:.5rem 0 .3rem">The miner's best share starts again from 0 every time it restarts.
           The app logs every new best the moment it's found, with the setting it was on, so the record survives restarts
           (it keeps the 20 biggest and shows the top 10). Mostly luck, so it says little about a setting.
-          Shown on the same scale as DATUM and mempool (the miner counts in units of 2<sup>32</sup> hashes), so you can
-          compare it with the network difficulty.</p>
+          Shown the way Settings → Best share numbers says: by default on the same scale as DATUM and mempool (the miner
+          counts in units of 2<sup>32</sup> hashes), so you can compare it with the network difficulty.</p>
         <table id="sclShareTable"><thead><tr><th class="num">#</th><th class="num">Best share</th><th>On</th><th style="text-align:right">Found</th></tr></thead>
           <tbody id="sclShareBody"></tbody></table>
         <div id="sclRejects"><h3>Rejected shares</h3><div id="sclRejBody" class="rj-line muted">—</div>
@@ -1171,6 +1171,35 @@
     $("tzSave").onclick = () => save($("tzIn").value.trim());
   }
 
+  // Settings: how best shares are shown (like DATUM and mempool, the miner's own number, or both)
+  function buildScale() {
+    const view = $("viewSettings"); if (!view || $("sclScale")) return;
+    const panel = document.createElement("div"); panel.className = "panel compact"; panel.id = "sclScale";
+    const acc = $("sclAccount"); view.insertBefore(panel, acc || null);
+    renderScale();
+  }
+  async function renderScale() {
+    const panel = $("sclScale"); if (!panel) return;
+    let s; try { s = await api("GET", "/api/settings/share_scale"); } catch (e) { panel.innerHTML = `<h2>Best share numbers</h2><p class="muted">Couldn't load: ${esc(e.message)}</p>`; return; }
+    const opt = (k, hint) => `<label class="scl-scale-opt" style="display:flex;gap:.5rem;align-items:baseline;margin:.25rem 0;cursor:pointer">
+        <input type="radio" name="sclScale" value="${k}" ${s.share_scale === k ? "checked" : ""} style="width:auto;min-width:0" />
+        <span><b>${esc(s.labels[k])}</b> <span class="mono" style="color:var(--text)">${esc(s.examples[k])}</span><br>
+        <span class="muted" style="font-size:.8rem">${hint}</span></span></label>`;
+    panel.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Best share numbers</h2>
+        <span class="pill">${esc(s.labels[s.share_scale])}</span></div>
+      <p class="muted" style="margin:.3rem 0 .5rem;font-size:.85rem">How best shares and records are shown on the Fleet cards, the Miner page,
+        notifications and the widget. The miner counts share difficulty in units of 2<sup>32</sup> hashes; DATUM and mempool count in
+        hashes. Only the display changes: the saved history stays as it is, so you can switch any time.</p>
+      ${opt("hashes", "The same scale as DATUM's share difficulty and the network difficulty (for example 21.85E), so you can compare them.")}
+      ${opt("miner", "The number the miner itself reports, as this app showed it before 1.15.5.")}
+      ${opt("both", "DATUM's scale, with the miner's own number after it in brackets.")}`;
+    panel.querySelectorAll('input[name="sclScale"]').forEach(r => r.onchange = async () => {
+      try { await api("POST", "/api/settings/share_scale", { share_scale: r.value }); toast(`Best share numbers: ${s.labels[r.value]}`);
+            await loadHw(); if (window.sclRefresh) window.sclRefresh(); renderScale(); }
+      catch (e) { toast(e.message, true); renderScale(); }
+    });
+  }
+
   function buildNotify() {
     const view = $("viewSettings"); if (!view || $("sclNotify")) return;
     const panel = document.createElement("div"); panel.className = "panel compact"; panel.id = "sclNotify";
@@ -1286,7 +1315,7 @@
   window.addEventListener("resize", () => { clearTimeout(steadyCards._r); steadyCards._r = setTimeout(steadyCards, 150); });
 
   // ------------------------------------------------------------ start
-  buildQuickBar(); buildDetail(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildRef();
+  buildQuickBar(); buildDetail(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildScale(); buildRef();
   loadNotify().then(() => updateDetailInfo());
   loadHw(); setInterval(loadHw, 15000);
   let lastDetail = null;

@@ -68,9 +68,21 @@ MINER_DIFF_UNIT = 2 ** 32
 _SI = (("Y", 1e24), ("Z", 1e21), ("E", 1e18), ("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("k", 1e3))
 
 
-def fmt(v: Any) -> str:
-    """A share difficulty from the miner, on DATUM's and mempool's scale and in their style: two decimals at
-    most, trailing zeros dropped, the letter right after the number. 1261948.2 -> '5.42P', 16384 -> '70.37T'."""
+SCALES = ("hashes", "miner", "both")
+_scale = ["hashes"]          # Settings -> Best share numbers (miners.json "share_scale"), set by fan_addon
+
+
+def set_scale(mode: str) -> None:
+    _scale[0] = mode if mode in SCALES else "hashes"
+
+
+def scale() -> str:
+    return _scale[0]
+
+
+def fmt_hashes(v: Any) -> str:
+    """On DATUM's and mempool's scale and in their style: two decimals at most, trailing zeros dropped, the
+    letter right after the number. 1261948.2 -> '5.42P', 16384 -> '70.37T'."""
     try:
         v = float(v) * MINER_DIFF_UNIT
     except (TypeError, ValueError):
@@ -79,6 +91,31 @@ def fmt(v: Any) -> str:
         if v >= div:
             return f"{v / div:.2f}".rstrip("0").rstrip(".") + unit
     return f"{v:.0f}"
+
+
+def fmt_miner(v: Any) -> str:
+    """The miner's own number (units of 2^32 hashes), as the app showed it before 1.15.5: 1261948.2 -> '1.26 M'."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "–"
+    for unit, div in (("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("k", 1e3)):
+        if v >= div:
+            x = v / div
+            return f"{x:.3g} {unit}" if x < 100 else f"{x:.0f} {unit}"
+    return f"{v:.0f}"
+
+
+def fmt(v: Any, short: bool = False) -> str:
+    """A share difficulty from the miner, the way Settings -> Best share numbers says: like DATUM and mempool
+    ('5.42P'), the miner's own number ('1.26 M'), or both ('5.42P (1.26 M)'). short: one of them only (the
+    widget), the DATUM one when both are picked."""
+    mode = _scale[0]
+    if mode == "miner":
+        return fmt_miner(v)
+    if mode == "both" and not short and fmt_hashes(v) != "–":
+        return f"{fmt_hashes(v)} ({fmt_miner(v)})"
+    return fmt_hashes(v)
 
 
 def _on_what(row: dict[str, Any], presets: dict[str, Any], clock: float | None, mid: str) -> str:

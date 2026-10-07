@@ -8,6 +8,18 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.6 (2026-10-07)
+
+- **Settings → Best share numbers** (`/api/settings/share_scale`, GET and POST; `share_scale` in
+  `miners.json`, left out for the default): `hashes` (the default: x 2^32, like DATUM and mempool, `5.42P`),
+  `miner` (the miner's own number as before 1.15.5, `1.26 M`) or `both` (`5.42P (1.26 M)`). It applies to
+  everything that shows a share (`shares_addon.fmt`: Fleet card, Best share panel and top 10, notifications;
+  the widget shows one number, DATUM's when both are picked). Read once at start and when changed; the
+  saved history is untouched, so switching back and forth loses nothing.
+- **New gallery and README images**, with best shares in the new format and realistic values.
+- **Note on 1.15.5:** its `v1.15.5` tag was made on the 1.15.4 commit, so the 1.15.5 image is 1.15.4's code.
+  1.15.6 has everything 1.15.5 was meant to have.
+
 ## 1.15.5 (2026-10-07)
 
 - **Best share on DATUM's and mempool's scale.** The miner counts share difficulty in the old unit where

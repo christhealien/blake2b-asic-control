@@ -205,6 +205,8 @@ def _tick_all(self: Any) -> None:
     now = time.time()
     if _tz_applied[0] is None:
         apply_saved_tz()          # once, as soon as the registry can be read
+    if not _scale_loaded[0]:
+        apply_saved_scale()
     if now - _last_import_check[0] >= 5:
         _last_import_check[0] = now
         try:
@@ -1647,6 +1649,41 @@ def set_tz(body: dict[str, Any]) -> dict[str, Any]:
     return tz_state()
 
 
+# ---------------------------------------------------------------- best share numbers
+_scale_loaded = [False]
+SCALE_LABELS = {"hashes": "Like DATUM and mempool", "miner": "The miner's own numbers", "both": "Both"}
+
+
+def apply_saved_scale() -> None:
+    try:
+        shares_addon.set_scale(str((_srv().load_registry_doc() or {}).get("share_scale") or "hashes"))
+        _scale_loaded[0] = True
+    except Exception:
+        pass
+
+
+def scale_state() -> dict[str, Any]:
+    ex = 1261948.2
+    return {"ok": True, "share_scale": shares_addon.scale(), "labels": SCALE_LABELS,
+            "examples": {"hashes": shares_addon.fmt_hashes(ex), "miner": shares_addon.fmt_miner(ex),
+                         "both": f"{shares_addon.fmt_hashes(ex)} ({shares_addon.fmt_miner(ex)})"}}
+
+
+def set_scale(body: dict[str, Any]) -> dict[str, Any]:
+    mode = str(body.get("share_scale") or "")
+    if mode not in shares_addon.SCALES:
+        raise ValueError("share_scale must be hashes, miner or both")
+    srv = _srv()
+    doc = srv.load_registry_doc()
+    if mode == "hashes":
+        doc.pop("share_scale", None)          # the default
+    else:
+        doc["share_scale"] = mode
+    srv.save_registry_doc(doc)
+    shares_addon.set_scale(mode)
+    return scale_state()
+
+
 def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
     if path in notify_addon.ROUTES_GET:
         json_response(handler, 200, notify_addon.ROUTES_GET[path]())
@@ -1675,6 +1712,9 @@ def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
     if path == "/api/settings/timezone":
         json_response(handler, 200, tz_state())
         return True
+    if path == "/api/settings/share_scale":
+        json_response(handler, 200, scale_state())
+        return True
     if path in ("/api/hardware/report", "/api/hardware/report/download"):
         from urllib.parse import parse_qs, urlparse
         mid = (parse_qs(urlparse(handler.path).query).get("miner") or [""])[0]
@@ -1698,7 +1738,7 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
           "/api/quick/demo": set_demo, "/api/hardware/shares_reset": shares_addon.reset, "/api/quick/manual": take_manual,
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
           "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, **schedule_addon.ROUTES_POST,
-          "/api/settings/timezone": set_tz, **notify_addon.ROUTES_POST}.get(path)
+          "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale, **notify_addon.ROUTES_POST}.get(path)
     if not fn:
         return False
     try:

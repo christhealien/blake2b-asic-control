@@ -215,7 +215,7 @@ def overview() -> dict[str, Any]:
              "subtext": f"TH/s · {len(online)}/{len(miners)} online" if miners else "add miners in Settings"},
             {"title": "Hottest ASIC", "text": f"{hot['max_t']:.0f}" if hot else "–",
              "subtext": f"°C · {hot['name']}" if hot else ""},
-            {"title": "Best share", "text": shares_addon.fmt(top["best"]).replace(" ", "") if top else "–",
+            {"title": "Best share", "text": shares_addon.fmt(top["best"], short=True).replace(" ", "") if top else "–",
              "subtext": f"since restart · {top['name']}" if top else ""},
             {"title": "Tuner", "text": t_text, "subtext": t_sub},
         ],
@@ -235,7 +235,7 @@ def miner_list() -> dict[str, Any]:
         if m.get("max_t") is not None:
             bits.append(f"{m['max_t']:.0f} °C")
         if m.get("best"):
-            bits.append(f"best {shares_addon.fmt(m['best'])}")
+            bits.append(f"best {shares_addon.fmt(m['best'], short=True)}")
         items.append({"text": f"{m['icon']} {m['name']} · {m['status']}", "subtext": " · ".join(bits)})
     if not items:
         items.append({"text": "No miners yet", "subtext": "Add one under Settings"})
