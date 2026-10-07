@@ -8,6 +8,15 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.4 (2026-10-07)
+
+- **Fleet: the restart bar no longer blinks.** Every Fleet refresh redraws all the cards, and the card was drawn
+  with the bar hidden and the Restart button enabled; a timer put the bar back up to 250 ms later, so it flickered
+  on each refresh during a restart. The card is now drawn with the bar's current state (shown, its width and
+  text, the button disabled), from the same `rbarState()` the 4-a-second timer uses (`paintRbar`, which only
+  touches what changed). Measured over 16 s of a restart with a redraw every 0.7 s: 83 frames without the bar
+  before, none after.
+
 ## 1.15.3 (2026-10-07)
 
 - **For the StartOS package** (no change on Umbrel):

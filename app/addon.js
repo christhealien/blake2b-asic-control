@@ -279,12 +279,40 @@
     }).join("");
     return `<div class="scl-prow"><span class="muted">Preset</span><div class="scl-pbtns">${btns}</div></div>`;
   };
+  // restart progress: counts up against how long this miner's restarts usually take (the server keeps its last few
+  // restart times; 75 s until it has one)
+  let hwAt = Date.now();
+  const RPHASE = { send: "sending the restart", wait: "restarting", down: "restarting (not answering yet)",
+                   up: "back up, waiting for hashing to start", hashing: "hashing again" };
+  const rbarState = (id) => {
+    const r = (HW[id] || {}).restart, since = (Date.now() - hwAt) / 1000;
+    const show = !!r && (r.state === "restarting" || (r.ago_s != null && r.ago_s + since < 12));
+    if (!show) return { show: false, busy: false };
+    if (r.state !== "restarting") return { show: true, busy: false, pct: 100, cls: r.state === "done" ? "ok" : "bad", text: r.msg || r.state };
+    const exp = r.expect_s || 75, t = (r.elapsed_s || 0) + since;
+    // linear up to 95% at the usual time, then creeps on so it never sits still or reaches the end early
+    const pct = t <= exp ? 95 * t / exp : 95 + 4 * (1 - Math.exp(-(t - exp) / exp));
+    return { show: true, busy: true, pct, cls: "",
+             text: `${RPHASE[r.phase] || "restarting"}… ${Math.round(t)} s / ~${Math.round(exp)} s` + (t > exp * 1.3 ? " (slower than usual)" : "") };
+  };
+  function paintRbar(el) {
+    const st = rbarState(el.dataset.id);
+    const btn = el.parentNode && el.parentNode.querySelector(`.scl-cbtn[data-act="restart"]`);
+    if (el.hidden !== !st.show) el.hidden = !st.show;
+    if (!st.show) return;
+    if (btn && btn.disabled !== st.busy && !btn.dataset.locked) btn.disabled = st.busy;
+    const fill = el.querySelector(".scl-rbar-fill"), txt = el.querySelector(".scl-rbar-txt");
+    const cls = "scl-rbar" + (st.cls ? " " + st.cls : "");
+    if (el.className !== cls) el.className = cls;
+    fill.style.width = st.pct.toFixed(1) + "%";
+    if (txt.textContent !== st.text) txt.textContent = st.text;
+  }
   // card buttons: switch pool, restart, schedule on/off, the miner's own web page
   const hostOf = (url) => String(url || "").replace(/^stratum\+(tcp|ssl):\/\//, "").replace(/\/.*$/, "");
   window.sclCardActions = (m) => {
     const id = m.id, sn = m.snapshot || {}, pools = sn.pools || [], wp = sn.working_pool || {};
     if (String(id).startsWith("demo-")) return `<span class="muted" style="font-size:.8rem">(demo miner: no actions)</span>`;
-    const h = HW[id] || {}, tuning = !!h.tuning;
+    const h = HW[id] || {}, tuning = !!h.tuning, rb = rbarState(id);
     const opts = pools.length ? pools.map((p, i) => {
       const on = String(p.id) === String(wp.id);
       return `<option value="${i}" ${on ? "selected" : ""} ${p.status !== "Alive" ? "" : ""}>P${esc(p.id)} · ${esc(hostOf(p.url))}${on ? " (mining)" : p.status !== "Alive" ? " (down)" : ""}</option>`;
@@ -296,37 +324,16 @@
         <select class="scl-pool" data-id="${esc(id)}" title="Switch pool: the one you pick becomes the first pool and the miner restarts" ${pools.length ? "" : "disabled"}>${opts}</select>
       </div>
       <div class="scl-crow">
-        <button type="button" class="scl-cbtn danger" data-act="restart" data-id="${esc(id)}" ${tuning ? "disabled title='Locked while tuning'" : "title='Soft-restart the miner software (hashing pauses about a minute)'"}>Restart</button>
+        <button type="button" class="scl-cbtn danger" data-act="restart" data-id="${esc(id)}" ${tuning ? "disabled data-locked='1' title='Locked while tuning'" : `${rb.busy ? "disabled " : ""}title='Soft-restart the miner software (hashing pauses about a minute)'`}>Restart</button>
         ${sch}
         <a class="scl-cbtn" href="http://${esc(m.ip)}/" target="_blank" rel="noopener" title="The miner's own web page">Miner page ↗</a>
       </div>
-      <div class="scl-rbar" data-id="${esc(id)}" hidden><div class="scl-rbar-track"><div class="scl-rbar-fill"></div></div><div class="scl-rbar-txt"></div></div>`;
+      <div class="${rb.cls ? "scl-rbar " + rb.cls : "scl-rbar"}" data-id="${esc(id)}" ${rb.show ? "" : "hidden"}><div class="scl-rbar-track"><div class="scl-rbar-fill" style="width:${rb.show ? rb.pct.toFixed(1) : 0}%"></div></div><div class="scl-rbar-txt">${rb.show ? esc(rb.text) : ""}</div></div>`;
   };
-  // restart progress bar on the cards: counts up against how long this miner's restarts usually take
-  // (the server keeps its last few restart times; 75 s until it has one). Redrawn 4x a second.
-  let hwAt = Date.now();
-  const RPHASE = { send: "sending the restart", wait: "restarting", down: "restarting (not answering yet)",
-                   up: "back up, waiting for hashing to start", hashing: "hashing again" };
-  setInterval(() => {
-    document.querySelectorAll(".scl-rbar").forEach(el => {
-      const r = (HW[el.dataset.id] || {}).restart, since = (Date.now() - hwAt) / 1000;
-      const btn = el.parentNode && el.parentNode.querySelector(`.scl-cbtn[data-act="restart"]`);
-      const show = r && (r.state === "restarting" || (r.ago_s != null && r.ago_s + since < 12));
-      el.hidden = !show; if (!show) return;
-      const fill = el.querySelector(".scl-rbar-fill"), txt = el.querySelector(".scl-rbar-txt");
-      const exp = r.expect_s || 75, t = (r.elapsed_s || 0) + since;
-      if (btn) btn.disabled = r.state === "restarting";
-      if (r.state === "restarting") {
-        // linear up to 95% at the usual time, then creeps on so it never sits still or reaches the end early
-        const pct = t <= exp ? 95 * t / exp : 95 + 4 * (1 - Math.exp(-(t - exp) / exp));
-        fill.style.width = pct.toFixed(1) + "%"; el.className = "scl-rbar";
-        txt.textContent = `${RPHASE[r.phase] || "restarting"}… ${Math.round(t)} s / ~${Math.round(exp)} s` + (t > exp * 1.3 ? " (slower than usual)" : "");
-      } else {
-        fill.style.width = "100%"; el.className = "scl-rbar " + (r.state === "done" ? "ok" : "bad");
-        txt.textContent = r.msg || r.state;
-      }
-    });
-  }, 250);
+  // restart progress bar on the cards: kept moving 4x a second by paintRbar. The card itself is drawn with the
+  // bar's current state (sclCardActions), so a Fleet refresh, which redraws every card, never shows a card without
+  // its bar for a frame (it used to blink).
+  setInterval(() => document.querySelectorAll(".scl-rbar").forEach(paintRbar), 250);
   document.addEventListener("change", async (e) => {
     const sel = e.target.closest && e.target.closest(".scl-pool"); if (!sel) return;
     const id = sel.dataset.id, m = (S().miners || []).find(x => x.id === id) || {}, p = ((m.snapshot || {}).pools || [])[Number(sel.value)];

@@ -11,7 +11,7 @@ services:
 
   web:
     # Built from app/ by GitHub Actions (.github/workflows/image.yml) for amd64 and arm64
-    image: ghcr.io/christhealien/blake2b-asic-control:1.15.3
+    image: ghcr.io/christhealien/blake2b-asic-control:1.15.4
     user: "1000:1000"
     init: true
     restart: on-failure

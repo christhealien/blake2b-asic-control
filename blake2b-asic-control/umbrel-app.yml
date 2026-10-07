@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.3
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.4
 category: developer
-version: "1.15.3"
+version: "1.15.4"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -46,14 +46,19 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.3
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.3
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.3
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.3
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.3
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.3
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.4
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.4
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.4
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.4
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.4
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.4
 releaseNotes: |-
-  **What's new in 1.15.3**
+  **What's new in 1.15.4**
+
+  - **No more flicker during a restart:** the Fleet card's restart bar and the greyed-out Restart button
+    no longer blink off each time the page refreshes.
+
+  **1.15.3**
 
   - Groundwork for the StartOS package (nothing changes on Umbrel): a command to set the login for a
     platform that makes the password itself, and a StartOS sign-in hint on the login page.
