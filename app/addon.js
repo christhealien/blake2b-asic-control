@@ -484,8 +484,10 @@
   }, 0);
   window.sclHashTile = (m, avgText) => {
     const g = (HW[m.id] || {}).hashrate;
-    const sub = `<div class="muted" style="font-size:.68rem;margin-top:.15rem" title="The miner's own average since its mining software last started (it includes any tuning steps or other clocks since then)">avg since restart ${esc(avgText)}</div>`;
-    if (!g || g.now == null) return `<div><div class="label">Hashrate</div><div class="value">${esc(avgText)}</div><div class="muted" style="font-size:.68rem;margin-top:.15rem">average since restart</div></div>`;
+    // one line, never wrapping: a number getting longer would otherwise make the card (and the page) jump
+    const one = "font-size:.68rem;margin-top:.15rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+    const sub = `<div class="muted" style="${one}" title="avg since restart ${esc(avgText)}: the miner's own average since its mining software last started (it includes any tuning steps or other clocks since then)">avg since restart ${esc(avgText)}</div>`;
+    if (!g || g.now == null) return `<div><div class="label">Hashrate</div><div class="value">${esc(avgText)}</div><div class="muted" style="${one}">average since restart</div></div>`;
     return `<div title="The miner's 20-second hashrate at the last reading (every 30 s)"><div class="label">Hashrate</div><div class="value">${fmtTH(g.now)}</div>${sub}</div>`;
   };
   window.sclPill = (id) => {
@@ -590,7 +592,9 @@
         <div class="scl-share-stats" id="sclShareStats"></div>
         <p class="muted" style="font-size:.78rem;margin:.5rem 0 .3rem">The miner's best share starts again from 0 every time it restarts.
           The app logs every new best the moment it's found, with the setting it was on, so the record survives restarts
-          (it keeps the 20 biggest and shows the top 10). Mostly luck, so it says little about a setting.</p>
+          (it keeps the 20 biggest and shows the top 10). Mostly luck, so it says little about a setting.
+          Shown on the same scale as DATUM and mempool (the miner counts in units of 2<sup>32</sup> hashes), so you can
+          compare it with the network difficulty.</p>
         <table id="sclShareTable"><thead><tr><th class="num">#</th><th class="num">Best share</th><th>On</th><th style="text-align:right">Found</th></tr></thead>
           <tbody id="sclShareBody"></tbody></table>
         <div id="sclRejects"><h3>Rejected shares</h3><div id="sclRejBody" class="rj-line muted">—</div>
@@ -994,7 +998,7 @@
       ["GET /cpb/hshistory", "The hashrate history behind the Home page's graph."],
     ]},
     { t: "Port 4028 (mining software API)", where: "The mining software is intminer, a BFGMiner fork. Send one JSON line such as {\"command\":\"summary\"} to port 4028; no login. The miner's config only gives write access to the miner itself (127.0.0.1), so from your network the changing commands are refused (\"Access denied\").", items: [
-      ["{\"command\":\"summary\"}", "✓ Whole miner: MHS av / MHS 20s (hashrate in MH/s), Accepted, Rejected, Hardware Errors, Best Share (since restart; the app's best-share tracking reads it), Elapsed (seconds since the software started), Device Hardware%, Pool Rejected%."],
+      ["{\"command\":\"summary\"}", "✓ Whole miner: MHS av / MHS 20s (hashrate in MH/s), Accepted, Rejected, Hardware Errors, Best Share (since restart, in the miner's unit of 2^32 hashes; the app shows it x 2^32, as DATUM and mempool do), Elapsed (seconds since the software started), Device Hardware%, Pool Rejected%."],
       ["{\"command\":\"devs\"}", "✓ One entry per board (PGA 0–3): MHS av / 20s, Accepted, Rejected, Hardware Errors, clock, voltage (reads about 230 mV above the plan on an SC Lite), fan0–fan3 (RPM), tstemp-0/1/2 (temperatures), overheat, rebootcnt, estimate_hash_rate."],
       ["{\"command\":\"pools\"}", "✓ Each pool: URL, user, status, priority, accepted / rejected / stale, and the one in use."],
       ["{\"command\":\"stats\"}", "Per-board driver statistics."],
@@ -1257,6 +1261,29 @@
       await loadNotify(); if ($("sclNotify")) renderNotify();
     } catch (err) { toast(err.message, true); e.target.checked = !e.target.checked; }
   });
+
+  // Fleet cards keep the tallest height they've had (until the window is resized): every refresh redraws the
+  // cards, and a value that wraps onto one more or one fewer line would make the page jump and the browser flash
+  // its scrollbar. Runs as the cards are put in, before the browser paints them.
+  const cardMax = new Map();
+  let cardW = window.innerWidth;
+  function steadyCards() {
+    const grid = $("fleetGrid"); if (!grid) return;
+    if (window.innerWidth !== cardW) { cardW = window.innerWidth; cardMax.clear(); }
+    [...grid.children].forEach((card, i) => {
+      const idEl = card.querySelector("[data-id]"), key = (idEl && idEl.dataset.id) || "#" + i;
+      card.style.minHeight = "";
+      const h = card.offsetHeight, max = Math.max(h, cardMax.get(key) || 0);
+      cardMax.set(key, max);
+      if (max > h) card.style.minHeight = max + "px";
+    });
+  }
+  setTimeout(function watchGrid() {
+    const grid = $("fleetGrid"); if (!grid) return setTimeout(watchGrid, 500);
+    new MutationObserver(steadyCards).observe(grid, { childList: true });
+    steadyCards();
+  }, 0);
+  window.addEventListener("resize", () => { clearTimeout(steadyCards._r); steadyCards._r = setTimeout(steadyCards, 150); });
 
   // ------------------------------------------------------------ start
   buildQuickBar(); buildDetail(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildRef();

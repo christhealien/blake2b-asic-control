@@ -60,16 +60,24 @@ def _save(doc: dict[str, Any]) -> None:
     os.replace(tmp, p)
 
 
+# The miner counts share difficulty in the old unit where difficulty 1 = 2^32 hashes (checked on an SC Lite:
+# MHS av x Elapsed / Difficulty Accepted came to 4.287e9). DATUM and mempool show difficulty in hashes, so a
+# share is shown here x 2^32: an SC Lite share of 16384 is 70.37T, as DATUM shows it. Stored values stay in the
+# miner's own unit; only what's shown is converted.
+MINER_DIFF_UNIT = 2 ** 32
+_SI = (("Y", 1e24), ("Z", 1e21), ("E", 1e18), ("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("k", 1e3))
+
+
 def fmt(v: Any) -> str:
-    """Share difficulty in k / M / G / T / P (1e3 .. 1e15): 99727855 -> '99.7 M', 1e14 -> '100 T'."""
+    """A share difficulty from the miner, on DATUM's and mempool's scale and in their style: two decimals at
+    most, trailing zeros dropped, the letter right after the number. 1261948.2 -> '5.42P', 16384 -> '70.37T'."""
     try:
-        v = float(v)
+        v = float(v) * MINER_DIFF_UNIT
     except (TypeError, ValueError):
         return "–"
-    for unit, div in (("P", 1e15), ("T", 1e12), ("G", 1e9), ("M", 1e6), ("k", 1e3)):
+    for unit, div in _SI:
         if v >= div:
-            x = v / div
-            return f"{x:.3g} {unit}" if x < 100 else f"{x:.0f} {unit}"
+            return f"{v / div:.2f}".rstrip("0").rstrip(".") + unit
     return f"{v:.0f}"
 
 

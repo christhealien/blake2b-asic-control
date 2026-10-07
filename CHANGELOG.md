@@ -8,6 +8,24 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.5 (2026-10-07)
+
+- **Best share on DATUM's and mempool's scale.** The miner counts share difficulty in the old unit where
+  difficulty 1 = 2^32 hashes: on an SC Lite, MHS av x Elapsed / Difficulty Accepted came to 4.287e9 (2^32 is
+  4.295e9), and its shares of 16384 are the 70T shares DATUM shows (7.3P over 104 shares). DATUM and mempool
+  show difficulty in hashes (the network's 21.85E is about 39.6 PH/s x 600 s). `shares_addon.fmt` now shows a
+  share x 2^32 and in their style: two decimals at most, trailing zeros dropped, the letter right after the
+  number (1261948 -> `5.42P`; it was `1.26 M`). Everything that shows a share uses it (Fleet card, Best share
+  panel and top 10, notifications, widget), and stored values stay in the miner's unit, so the record and
+  history are converted when shown. The Best share panel says which scale it's on.
+- **Fleet: the page no longer jumps on refresh** (the browser's overlay scrollbar flashed each time). The
+  Hashrate tile's "avg since restart …" line wrapped onto a second line or not depending on the numbers, so a
+  refresh could make a card, its row and the page one line taller or shorter. That line now stays on one line
+  (cut with "…", the full text on hover), and each card keeps the tallest height it has had (`steadyCards`, a
+  MutationObserver on `#fleetGrid` that sets `min-height` before the browser paints; reset when the window
+  width changes), so a value elsewhere changing length can't shrink the page either. Measured over 46 s of
+  refreshes at 1400, 760 and 390 px: one growth the first time a card reached its full height, then no change.
+
 ## 1.15.4 (2026-10-07)
 
 - **Fleet: the restart bar no longer blinks.** Every Fleet refresh redraws all the cards, and the card was drawn
