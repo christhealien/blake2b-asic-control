@@ -28,7 +28,7 @@ if (-not (Test-Path (Join-Path $L "app\webui\static\profiles.html")) -or
   Copy-Item -Recurse (Join-Path $L "src\sc-lite\webui") (Join-Path $L "app\webui")
   Copy-Item -Recurse (Join-Path $L "src\sc-lite\python") (Join-Path $L "app\python")
   Remove-Item -Recurse -Force (Join-Path $L "src")
-  $files = "tuner_addon.py","tuner.html","fan_addon.py","profiles.html","schedule_addon.py","shares_addon.py","health_addon.py","miner_safety.py","notify_addon.py","rejects_addon.py","hashrate_addon.py","schedule.html","addon.js",
+  $files = "tuner_addon.py","tuner.html","fan_addon.py","profiles.html","schedule_addon.py","shares_addon.py","health_addon.py","miner_safety.py","notify_addon.py","rejects_addon.py","hashrate_addon.py","report_addon.py","schedule.html","addon.js",
            "auth_addon.py","login.html","theme.css","theme.js","widget_server.py","install_addons.py"
   foreach ($f in $files) { Copy-Item $f (Join-Path $L "app\webui") }
   Copy-Item "asic_tuner.py" (Join-Path $L "app\python")
@@ -57,6 +57,8 @@ $env:SCLITE_WEBUI_PORT = "$Port"
 $env:SCLITE_WEBUI_MINERS = Join-Path $L "data\miners.json"
 $env:SCLITE_TUNER_DATA = Join-Path $L "data\tuner"
 $env:PYTHONUNBUFFERED = "1"
+$m = Select-String -Path (Join-Path $PSScriptRoot "Dockerfile") -Pattern "B2AC_VERSION=([0-9.]+)" | Select-Object -First 1
+if ($m) { $env:B2AC_VERSION = $m.Matches[0].Groups[1].Value }
 Write-Host "== open http://127.0.0.1:$Port  (Ctrl+C to stop)"
 Write-Host "   first visit: create a login; add miners under Settings, or show demo miners there"
 Set-Location (Join-Path $L "app\webui")

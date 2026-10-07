@@ -113,7 +113,11 @@
         <span class="muted" style="font-size:.85rem">Detected as</span>
         <span id="stHw" class="mono" style="font-size:.85rem">—</span>
         <button type="button" id="btnProbe">Probe now</button>
+        <button type="button" id="btnReport" title="Reads the miner (nothing is changed) and downloads a zip with private details taken out">Download report</button>
+        <label class="muted" style="font-size:.85rem"><input type="checkbox" id="repLog" checked> with the miner's log</label>
+        <span id="repState" class="muted" style="font-size:.85rem"></span>
       </div>
+      <p id="repNote" class="hint hidden" style="margin:.5rem 0 0"></p>
       <p class="hint" style="margin-bottom:0">Everything on this page is per miner: pick the miner here. Fan curves are a shared
         list any miner can use; presets belong to the miner they were made for.</p>
     </section>
@@ -788,6 +792,8 @@ function pickMiner(id) {
   $("minerSel").value = id;
   $("presetForm").classList.add("hidden"); pfKey = null;
   renderAll();
+  $("repState").textContent = ""; $("btnReport").disabled = false;
+  if (typeof pollReport === "function") pollReport(id, false);
 }
 $("minerSel").onchange = () => pickMiner($("minerSel").value);
 $("btnProbe").onclick = async () => {
@@ -796,6 +802,40 @@ $("btnProbe").onclick = async () => {
   try { const j = await api("POST", "/api/hardware/probe", { miner_id: m.id }); toast(j.hardware.ok ? "Probed: " + j.line : "Probe failed: " + j.line, !j.hardware.ok); }
   catch (e) { toast(e.message, true); }
   finally { $("btnProbe").disabled = false; load(); }
+};
+
+// a report: what it takes to support a model the app hasn't been tested on, to look over and send in
+let repTimer = null;
+async function pollReport(id, want) {
+  clearTimeout(repTimer);
+  try {
+    const j = await api("GET", "/api/hardware/report?miner=" + encodeURIComponent(id));
+    if (id !== minerId) return;
+    if (j.state === "running") {
+      $("repState").textContent = `reading the miner… ${j.done}/${j.total} (${j.step || ""})`;
+      $("btnReport").disabled = true;
+      repTimer = setTimeout(() => pollReport(id, want), 1500);
+      return;
+    }
+    $("btnReport").disabled = false;
+    if (j.state === "done" && !want) {
+      $("repState").innerHTML = `<a href="/api/hardware/report/download?miner=${encodeURIComponent(id)}">last report</a>`;
+    } else if (j.state === "done") {
+      $("repState").textContent = "ready: " + (j.step || "");
+      location.href = "/api/hardware/report/download?miner=" + encodeURIComponent(id);
+      toast("Report downloaded: look it over, then attach it to an issue on GitHub");
+      load();
+    } else if (j.state === "error" && want) {
+      $("repState").textContent = "";
+      toast("Report failed: " + (j.step || "no answer"), true);
+    } else $("repState").textContent = "";
+  } catch (e) { $("btnReport").disabled = false; $("repState").textContent = ""; toast(e.message, true); }
+}
+$("btnReport").onclick = async () => {
+  const m = miner(); if (!m) return;
+  $("btnReport").disabled = true; $("repState").textContent = "starting…";
+  try { await api("POST", "/api/hardware/report", { miner_id: m.id, log: $("repLog").checked }); pollReport(m.id, true); }
+  catch (e) { $("btnReport").disabled = false; $("repState").textContent = ""; toast(e.message, true); }
 };
 
 function renderHeader() {
@@ -819,6 +859,12 @@ function renderHeader() {
   $("stHw").textContent = !m ? "—" : m.probing ? "probing…" : m.hardware_line || "not probed yet";
   $("stHw").style.color = hw && hw.ok ? "var(--text)" : "var(--warn)";
   $("btnProbe").textContent = hw && hw.ok ? "Probe again" : "Probe now";
+  const untested = hw && hw.ok && !hw.tuner_tested;
+  $("repNote").classList.toggle("hidden", !untested);
+  if (untested) $("repNote").innerHTML = "This model hasn't been tested with the tuner yet, so presets and tuning stay off for it. "
+    + "<b>Download report</b> reads it (nothing is changed, about 30 s) and saves a zip with private details taken out: "
+    + "look it over, then attach it to an issue at <a href=\"https://github.com/christhealien/blake2b-asic-control/issues\" "
+    + "target=\"_blank\" rel=\"noopener\">GitHub</a> to help add support.";
 }
 function renderAll() {
   renderHeader();

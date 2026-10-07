@@ -33,6 +33,7 @@ SAFETY = HERE / "miner_safety.py"
 NOTIFY = HERE / "notify_addon.py"
 REJECTS = HERE / "rejects_addon.py"
 HASHRATE = HERE / "hashrate_addon.py"
+REPORT = HERE / "report_addon.py"
 EXTRA_PAGES = [(HERE / n, HERE / "static" / n) for n in ("schedule.html", "addon.js")]
 FAN_MARK = "fan_addon"
 APP_NAME = "Blake2b ASIC Control"
@@ -454,7 +455,7 @@ def patch_index(text: str) -> str:
 
 
 def install() -> None:
-    for p in (SERVER, INDEX, ADDON, AUTH, FANS, SCHED, SHARES, HEALTH, SAFETY, NOTIFY, REJECTS, HASHRATE):
+    for p in (SERVER, INDEX, ADDON, AUTH, FANS, SCHED, SHARES, HEALTH, SAFETY, NOTIFY, REJECTS, HASHRATE, REPORT):
         if not p.exists():
             raise SystemExit(f"missing {p}. Run this from the webui folder with all three files in it.")
     if PAGE_SRC.exists():

@@ -37,7 +37,14 @@
            cursor: crosshair; display: flex; align-items: center; justify-content: center; font: 600 .56rem/1 var(--mono); color: var(--text); }
     .blk.strong { color: var(--bg); }
     .blk.hr { margin-left: 2px; }                 /* a little gap on each whole hour */
-    .blk.now { outline: 2px solid var(--ok); outline-offset: 1px; z-index: 1; }
+    .wk { position: relative; }
+    .nowseg { position: absolute; width: 2px; margin-left: -1px; background: var(--ok); opacity: .4; border-radius: 1px;
+              pointer-events: none; z-index: 3; }
+    .nowseg.today { opacity: 1; width: 3px; margin-left: -1.5px; box-shadow: 0 0 0 1px var(--bg); }
+    .nowseg.today::before { content: ""; position: absolute; left: 50%; top: -4px; width: 7px; height: 7px; margin-left: -3.5px;
+                            border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 1px var(--bg); }
+    .nowlab { position: absolute; transform: translateX(-50%); pointer-events: none; z-index: 3; padding: 0 .3rem;
+              border-radius: 4px; background: var(--ok); color: var(--bg); font: 700 .64rem/1.35 var(--mono); white-space: nowrap; }
     .blk { position: relative; }
     .blk.rs { box-shadow: inset 0 0 0 2px var(--text); }
 
@@ -253,6 +260,15 @@ const ERASE = "__erase";
 const BACK = "__back";     // the rest of the time: nothing scheduled (back to what it ran before a painted stretch)
 let base = null;   // the preset the unpainted blocks run ("the rest of the time")
 const SLOT = 30, NSLOT = 48;
+// the app's clock (its time zone, Settings → Time zone), which the schedule runs on, not the browser's
+function appNow() {
+  // the app sends its UTC offset ("+0900"): its clock is UTC plus that, whatever zone the browser is in
+  const m = /^([+-])(\d{2})(\d{2})$/.exec((S && S.utc_offset) || "");
+  const off = m ? (m[1] === "-" ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : -new Date().getTimezoneOffset();
+  const a = new Date(Date.now() + off * 60000);
+  return { y: a.getUTCFullYear(), mo: a.getUTCMonth(), d: a.getUTCDate(), dow: (a.getUTCDay() + 6) % 7,
+           min: a.getUTCHours() * 60 + a.getUTCMinutes() + a.getUTCSeconds() / 60 };
+}
 const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
 function gridFromRules(rs) {
   const o = occ(rs), g = [];
@@ -334,13 +350,13 @@ function fillWeek() {
 }
 // scheduled restarts in this week: {day: {block: ["HH:MM", ...]}} (same rules as the server)
 function restartsThisWeek() {
-  const out = {}, now = new Date(), today = (now.getDay() + 6) % 7;
+  const out = {}, an = appNow(), today = an.dow;
   const add = (d, min) => { const k = Math.floor(min / SLOT), l = ((out[d] = out[d] || {})[k] = out[d][k] || []), t = hhmm(min); if (!l.includes(t)) l.push(t); };
   (rs.marks || []).forEach(m => add(Math.floor(m / 1440), m % 1440));
   if (!rs || rs.every === "off") return out;
   const at = /^\d{2}:\d{2}$/.test(rs.at || "") ? hm(rs.at) : 240, hh = Math.floor(at / 60), mm = at % 60;
   for (let d = 0; d < 7; d++) {
-    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (d - today));
+    const date = new Date(an.y, an.mo, an.d + (d - today));
     if (rs.every === "hour") for (let h = 0; h < 24; h++) add(d, h * 60 + mm);
     else if (rs.every === "6h" || rs.every === "12h") { const st = rs.every === "6h" ? 6 : 12; for (let h = 0; h < 24; h++) if (((h - hh) % st + st) % st === 0) add(d, h * 60 + mm); }
     else if (rs.every === "day") add(d, at);
@@ -354,7 +370,7 @@ function restartsThisWeek() {
   return out;
 }
 function drawWeek() {
-  const g = gridFromRules(rules), now = new Date(), today = (now.getDay() + 6) % 7, nowSlot = Math.floor((now.getHours() * 60 + now.getMinutes()) / SLOT);
+  const g = gridFromRules(rules), today = appNow().dow;
   const RS = restartsThisWeek(), marks = new Set(rs.marks || []);
   let h = `<div></div><div class="hrs">${[0, 3, 6, 9, 12, 15, 18, 21].map(x => `<span class="${x >= 12 ? "pm" : ""}">${String(x).padStart(2, "0")}:00</span>`).join("")}</div>`;
   for (let d = 0; d < 7; d++) {
@@ -364,20 +380,51 @@ function drawWeek() {
       const first = key != null && !rest && (k === 0 ? g[(d + 6) % 7][NSLOT - 1] !== key0 : g[d][k - 1] !== key0);
       const t0 = hhmm(k * SLOT), t1 = k === NSLOT - 1 ? "24:00" : hhmm((k + 1) * SLOT);
       const rsAt = (RS[d] || {})[k], marked = marks.has(d * 1440 + k * SLOT);
-      cells += `<div class="blk ${sh != null && sh >= 3 && !rest ? "strong" : ""} ${rest ? "rest" : ""} ${k % 2 === 0 && k ? "hr" : ""} ${d === today && k === nowSlot ? "now" : ""} ${rsAt ? "rs" : ""}"
+      cells += `<div class="blk ${sh != null && sh >= 3 && !rest ? "strong" : ""} ${rest ? "rest" : ""} ${k % 2 === 0 && k ? "hr" : ""} ${rsAt ? "rs" : ""}"
         data-d="${d}" data-k="${k}" data-tip="${esc(`${DAYS[d]} ${t0}–${t1}<br><b>${key == null ? (key0 === BACK ? "nothing scheduled (back to what it ran before)" : "no schedule") : labelOf(key)}</b>${rest ? " (the rest of the time)" : ""}${first ? "<br>switches here" : ""}${rsAt ? `<br>↻ restart at ${rsAt.join(", ")}${marked ? " (marked)" : " (repeat)"}` : ""}`)}"
         style="${sh != null ? `background:${rest ? `color-mix(in srgb, var(--ramp-${sh}) 40%, var(--cell-empty))` : `var(--ramp-${sh})`}` : ""}">${first ? esc(short(key)) : ""}</div>`;
     }
     h += `<div class="day ${d === today ? "today" : ""}">${DAYS[d]}</div><div class="blocks">${cells}</div>`;
   }
   $("week").innerHTML = h;
+  drawWeek.day = today;
+  placeNow();
   const ps = okPresets();
   $("key").innerHTML = (ps.length ? ps.map(([k, p]) => `<span><i style="background:var(--ramp-${shadeOf(k)})"></i>${esc(short(k))} = ${esc(p.label)}</span>`).join("") +
     (base && base !== BACK ? `<span><i style="background:color-mix(in srgb, var(--ramp-${shadeOf(base)}) 40%, var(--cell-empty))"></i>lighter = the rest of the time (${esc(labelOf(base))})</span>`
       : `<span><i style="background:var(--cell-empty)"></i>empty = nothing scheduled</span>`) +
-    `<span><i style="outline:2px solid var(--ok);outline-offset:-2px"></i>now</span><span>Letters mark where a preset starts.</span>` : "") +
+    `<span><i style="width:3px;border-radius:1px;background:var(--ok);box-shadow:none"></i>now (the app's clock)</span><span>Letters mark where a preset starts.</span>` : "") +
     (Object.keys(RS).length ? `<span><i style="box-shadow:inset 0 0 0 2px var(--text)"></i><b>↻</b> = restart</span>` : "");
 }
+// the "now" line: a mark at the current time on every day, strong on today, moved every 15 s
+function placeNow() {
+  const wk = $("week"); if (!wk) return;
+  wk.querySelectorAll(".nowseg, .nowlab").forEach(e => e.remove());
+  const an = appNow();
+  if (drawWeek.day != null && an.dow !== drawWeek.day) return drawWeek();     // past midnight: today moved
+  const slot = Math.min(NSLOT - 1, Math.floor(an.min / SLOT)), frac = (an.min - slot * SLOT) / SLOT;
+  for (let d = 0; d < 7; d++) {
+    const el = wk.querySelector(`.blk[data-d="${d}"][data-k="${slot}"]`); if (!el) continue;
+    const seg = document.createElement("div");
+    seg.className = "nowseg" + (d === an.dow ? " today" : "");
+    seg.style.left = (el.offsetLeft + frac * el.offsetWidth) + "px";
+    seg.style.top = (el.offsetTop - 3) + "px"; seg.style.height = (el.offsetHeight + 6) + "px";
+    wk.appendChild(seg);
+    if (d === an.dow) {
+      const lab = document.createElement("div"), mm = Math.floor(an.min);
+      lab.className = "nowlab";
+      lab.textContent = `${String(Math.floor(mm / 60)).padStart(2, "0")}:${String(mm % 60).padStart(2, "0")}`;
+      const hrs = wk.querySelector(".hrs");
+      lab.style.left = seg.style.left;
+      lab.style.top = (hrs ? hrs.offsetTop - 1 : 0) + "px";
+      wk.appendChild(lab);
+    }
+  }
+}
+setInterval(() => { if (!document.hidden) placeNow(); }, 15000);
+window.addEventListener("resize", () => { clearTimeout(placeNow._r); placeNow._r = setTimeout(placeNow, 100); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) placeNow(); });
+
 // painting: a click paints one block, a drag paints the rectangle from the first block (drag down for several days)
 let painting = false, paintFrom = null, paintBase = null, markBase = null, markMode = null;
 function rectOf(el) {

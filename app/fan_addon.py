@@ -60,6 +60,7 @@ import tuner_addon
 import notify_addon
 import rejects_addon
 import hashrate_addon
+import report_addon
 
 # ---------------------------------------------------------------- curve mode
 
@@ -1674,6 +1675,18 @@ def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
     if path == "/api/settings/timezone":
         json_response(handler, 200, tz_state())
         return True
+    if path in ("/api/hardware/report", "/api/hardware/report/download"):
+        from urllib.parse import parse_qs, urlparse
+        mid = (parse_qs(urlparse(handler.path).query).get("miner") or [""])[0]
+        if path == "/api/hardware/report":
+            json_response(handler, 200, report_addon.status(mid))
+            return True
+        got = report_addon.zip_of(mid)
+        if not got:
+            json_response(handler, 404, {"ok": False, "error": "no report ready for this miner (make one first)"})
+            return True
+        tuner_addon._send_file(handler, got[1], got[0], "application/zip")
+        return True
     return False
 
 
@@ -1681,6 +1694,7 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
     fn = {"/api/fans/profile": save_profile, "/api/fans/profile_delete": delete_profile,
           "/api/presets/apply": apply_preset, "/api/presets/save": save_preset,
           "/api/presets/delete": delete_preset, "/api/hardware/probe": probe_now,
+          "/api/hardware/report": report_addon.start,
           "/api/quick/demo": set_demo, "/api/hardware/shares_reset": shares_addon.reset, "/api/quick/manual": take_manual,
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
           "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, **schedule_addon.ROUTES_POST,
@@ -1721,6 +1735,35 @@ def _reject_client(mid: str) -> Any:
 
 
 rejects_addon._client = _reject_client
+
+
+def _report_probe(mid: str) -> dict[str, Any]:
+    with _probe_lock:
+        if mid in _probing:
+            raise ValueError("already probing this miner")
+        _probing.add(mid)
+    try:
+        return probe_hardware(mid)
+    finally:
+        with _probe_lock:
+            _probing.discard(mid)
+
+
+def _report_busy(mid: str) -> str:
+    if not any(_row_id(m) == mid for m in _srv().load_registry()):
+        return f"unknown miner {mid}"
+    if tuner_addon.running(mid):
+        return "a tuning run is going on this miner; make the report when the run has ended"
+    if mid in _probing:
+        return "the miner is being probed; try again in a few seconds"
+    if (_restarts.get(mid) or {}).get("state") == "restarting":
+        return "the miner is restarting; try again when it's back"
+    return ""
+
+
+report_addon._probe = _report_probe
+report_addon._client = _reject_client
+report_addon._busy = _report_busy
 notify_addon._srv = _srv
 notify_addon._tuner_running = lambda mid: bool(tuner_addon.running(mid))
 notify_addon._tuner_finished = lambda mid: str((tuner_addon.status(mid) or {}).get("finished_line") or "")

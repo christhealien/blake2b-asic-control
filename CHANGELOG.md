@@ -3,10 +3,44 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
-To release a version: put the number in `app/Dockerfile`, `blake2b-asic-control/docker-compose.yml`
+To release a version: put the number in `app/Dockerfile` (`B2AC_VERSION` and the version label), `blake2b-asic-control/docker-compose.yml`
 and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links, and a release note),
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
+
+## 1.15.1 (2026-10-07)
+
+- **Schedule: a live "now" line** in place of the outlined block: a thin mark at the current time on
+  every day (bold on today, with the time in a tab above the grid), placed inside the current block by
+  the minute and moved every 15 s, on a resize and when the page comes back into view; it redraws the
+  week when the day changes. On a phone (two lines a day) it sits on the line for that half of the day.
+- **The grid's "today" and "now" follow the app's clock** (its UTC offset from the schedule state),
+  not the browser's: with the browser in another time zone they were off by the difference. The
+  monthly restart marks use the app's date too.
+
+## 1.15.0 (2026-10-07)
+
+- **Download report** (Profiles, next to Probe; `POST /api/hardware/report`, then
+  `GET /api/hardware/report?miner=` for progress and `/api/hardware/report/download?miner=` for the
+  zip, kept 30 minutes): a fresh probe, then the reads from crProductGuy's capture guide (port 4028
+  `version`, `summary`, `devs`; `/mcb/status`, `/mcb/setting`, `/mcb/cgminer?cgminercmd=devs`,
+  `/mcb/algosetting`, `/dbg/minerinfo`, `/dbg/icinfo`, `/cpb/hshistory`) plus `/dbg/fanctrllog` and,
+  if ticked, `/dbg/minersyslog`. One request at a time, 2 s apart, all reads; refused while the miner
+  is being tuned, probed or restarted. Never read: `/mcb/pools`, `/mcb/wifisetting`, the 4028 `pools`
+  command.
+- **What's taken out** (`report_addon.scrub`): MAC addresses (as `00:11:22:33:44:55`), IP addresses,
+  URLs, e-mail addresses, any unbroken run of 24+ letters and digits (wallets, tokens, hashes), string
+  values under private-sounding keys (user, pass, wallet, worker, pool, url, ssid, host, ip, mac,
+  serial, ...) and any string value mentioning a pool, a user, a wallet or the network. From the
+  miner's log, such lines are dropped whole (the summary says how many). The token stays in the
+  request header and the password is never written. Tested against a capture with a planted wallet,
+  pool URL, worker, IPs, MACs, host name and e-mail address: none came through.
+- The zip has a README (what's in it, what was taken out, where to send it), `summary.txt` (what the
+  app found and which reads answered), the app's own probe and one file per read (`.error.txt` for a
+  read that failed: an error is a finding too). A miner that answers nothing gives an error, not an
+  empty zip.
+- A model the tuner hasn't been tested on says so on the Profiles page and points to the report.
+- The image carries its version (`B2AC_VERSION`), so a report says which app made it.
 
 ## 1.14.0 (2026-10-06): first public release
 

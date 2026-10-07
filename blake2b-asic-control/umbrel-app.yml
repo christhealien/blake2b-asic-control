@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.14.0
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.1
 category: developer
-version: "1.14.0"
+version: "1.15.1"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -46,14 +46,28 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.14.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.14.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.14.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.14.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.14.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.14.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.1
 releaseNotes: |-
-  **What's new in 1.14.0: the first public release**
+  **What's new in 1.15.1**
+
+  - **A live "now" line on the Schedule page:** a mark at the current time on every day, bold on today
+    with the time above it, moving as the clock does. It follows the app's time zone (Settings → Time
+    zone), which the schedule runs on, even when your browser is in another one.
+
+  **1.15.0**
+
+  - **Download report** (Profiles, next to Probe): reads a miner, one request at a time and changing
+    nothing, and saves a zip of what it takes to support a model or firmware the app hasn't been tested
+    on, with the miner's log if you like. The MAC address, IP addresses, pool URLs, wallets, workers and
+    tokens are taken out, and the pool and WiFi settings are never read. Look it over, then attach it to
+    an issue on GitHub. A model the tuner hasn't been tested on says so there and points to it.
+
+  **1.14.0: the first public release**
 
   - **A time zone setting** (Settings → Time zone). Schedules, restarts, logs and tuner files use the
     app's time zone, which is UTC until you pick yours (it offers your browser's).

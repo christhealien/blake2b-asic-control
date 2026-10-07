@@ -58,6 +58,15 @@ The SC BOX and HS BOX write their power plan differently (`725 MHz 0.41 V 70 RPM
 volts, no PV; the HS BOX keeps one plan list per algorithm), so the app shows what they run but
 leaves clock, voltage and fans alone until changing that format has been tested on real units.
 
+**Have a model or firmware that isn't tested yet?** Open **Profiles**, pick the miner and press
+**Download report**. It reads the miner (one request at a time, nothing is changed, about 30 s) and
+saves a zip of what support takes: how it writes clock and voltage, its boards and chips, what its own
+pages answer and, if ticked, its log. The MAC address, IP addresses, pool URLs, wallets, workers and
+tokens are taken out, and the pool and WiFi settings aren't read at all. It's plain text, so look it
+over, then attach it to a [new issue](https://github.com/christhealien/blake2b-asic-control/issues/new)
+saying which unit it is. Support is only claimed for a model after a report like this and a test on a
+real unit.
+
 ## Install
 
 **On Umbrel:** App Store → ⋯ (top right) → **Community App Stores** → add
@@ -144,6 +153,7 @@ Umbrel only reads `*/umbrel-app.yml` in a store repo, so `app/` is ignored by it
 | `addon.js` | Fleet, Miner page and Settings additions (quick bar, card buttons, graphs, chip map, locks) |
 | `shares_addon.py` | Best share tracking: since restart, the record and every new best as it is found |
 | `hashrate_addon.py` | The 24-hour hashrate history and marks behind the graphs |
+| `report_addon.py` | Download report: a miner's read-only answers, private details taken out, as a zip |
 | `rejects_addon.py` | Rejected shares: counts per hour, and stale vs not stale from the miner's own log |
 | `notify_addon.py` | Notifications: the watcher, and sending to Telegram / Discord |
 | `health_addon.py` | Chip health from the miner's own log: each chip's share of bad results, chip temperatures and voltage |
