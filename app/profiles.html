@@ -113,11 +113,29 @@
         <span class="muted" style="font-size:.85rem">Detected as</span>
         <span id="stHw" class="mono" style="font-size:.85rem">—</span>
         <button type="button" id="btnProbe">Probe now</button>
-        <button type="button" id="btnReport" title="Reads the miner (nothing is changed) and downloads a zip with private details taken out">Download report</button>
+        <button type="button" id="btnReport" title="Reads the miner (nothing is changed) and downloads a zip for adding support for a model. Nothing private goes in it: no pool, wallet, WiFi or password; MAC and IP addresses are taken out.">Download report</button>
         <label class="muted" style="font-size:.85rem"><input type="checkbox" id="repLog" checked> with the miner's log</label>
         <span id="repState" class="muted" style="font-size:.85rem"></span>
       </div>
       <p id="repNote" class="hint hidden" style="margin:.5rem 0 0"></p>
+      <details class="hint" id="repPriv" style="margin:.45rem 0 0">
+        <summary style="cursor:pointer"><b>Nothing private goes in the report.</b> It only reads (nothing on the miner is
+          changed), and it's plain text you can check before sending. What's left out:</summary>
+        <ul style="margin:.35rem 0 0 1.1rem;padding:0;line-height:1.5">
+          <li><b>Never read at all:</b> the pool settings (pool address, wallet, worker and its password), the WiFi
+            settings (network names and passwords) and the miner's pool list on port 4028.</li>
+          <li><b>Never written:</b> the miner's password and the login token.</li>
+          <li><b>Taken out of everything that is read:</b> the MAC address (shown as 00:11:22:33:44:55), IP addresses,
+            web and pool addresses, e-mail addresses, and anything that looks like a wallet address or a token.</li>
+          <li><b>Removed:</b> any setting named like user, password, wallet, worker, pool, url, ssid, host, ip, mac or
+            serial, and any text that mentions a pool, a user, a wallet or the network.</li>
+          <li><b>From the miner's log</b> (only if ticked): every line that mentions a pool, a user, a worker, a wallet,
+            a login or the network is dropped whole. Untick "with the miner's log" to leave the log out entirely.</li>
+        </ul>
+        <p style="margin:.35rem 0 0">What stays: model and firmware, the clock and voltage plans, boards, chips, fans,
+          temperatures, hashrate and error counts. The zip's README.txt lists the same, and summary.txt says how many
+          log lines were dropped.</p>
+      </details>
       <p class="hint" style="margin-bottom:0">Everything on this page is per miner: pick the miner here. Fan curves are a shared
         list any miner can use; presets belong to the miner they were made for.</p>
     </section>
@@ -823,7 +841,7 @@ async function pollReport(id, want) {
     } else if (j.state === "done") {
       $("repState").textContent = "ready: " + (j.step || "");
       location.href = "/api/hardware/report/download?miner=" + encodeURIComponent(id);
-      toast("Report downloaded: look it over, then attach it to an issue on GitHub");
+      toast("Report downloaded, with private details left out: look it over, then attach it to an issue on GitHub");
       load();
     } else if (j.state === "error" && want) {
       $("repState").textContent = "";
@@ -862,7 +880,7 @@ function renderHeader() {
   const untested = hw && hw.ok && !hw.tuner_tested;
   $("repNote").classList.toggle("hidden", !untested);
   if (untested) $("repNote").innerHTML = "This model hasn't been tested with the tuner yet, so presets and tuning stay off for it. "
-    + "<b>Download report</b> reads it (nothing is changed, about 30 s) and saves a zip with private details taken out: "
+    + "<b>Download report</b> reads it (nothing is changed, about 30 s) and saves a zip with nothing private in it (no pool, wallet, WiFi or password; MAC and IP addresses taken out): "
     + "look it over, then attach it to an issue at <a href=\"https://github.com/christhealien/blake2b-asic-control/issues\" "
     + "target=\"_blank\" rel=\"noopener\">GitHub</a> to help add support.";
 }

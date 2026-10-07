@@ -8,6 +8,19 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.2 (2026-10-07)
+
+- **Hashrate graphs: a scale on both sides** (Fleet card and Miner page). Round levels 1, 2, 2.5 or 5
+  x 10^n apart, at most 3 on a card and 5 on the Miner page (the step doubles until they fit), with as
+  few decimals as the step needs; in TH/s, or GH/s when the miner's highest point is under 1 TH/s.
+  Faint dotted level lines across the plot. The plot is inset by the width of the longest label on
+  each side, and the time labels under it and the marks follow the plot's edges.
+- **Download report: "Nothing private goes in the report"** under the button on the Profiles page,
+  opening to the list of what's never read (pool and WiFi settings, the 4028 pool list), never written
+  (password, token), taken out (MAC, IPs, URLs, e-mail, wallet- or token-like strings, private-named
+  settings, text mentioning a pool, user, wallet or the network) and dropped from the log, and what
+  stays. The button's hover text, the untested-model note and the toast after a download say it too.
+
 ## 1.15.1 (2026-10-07)
 
 - **Schedule: a live "now" line** in place of the outlined block: a thin mark at the current time on

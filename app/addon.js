@@ -387,11 +387,30 @@
     if (!g || !g.points || g.points.length < 2)
       return `<div style="grid-column:1/-1">${head("")}<div class="value muted" style="font-size:.8rem">collecting… (a point every 5 min; the graph fills in over 24 h)</div></div>`;
     const W = opt.W || 360, H = opt.H || 76, T = 17, B = 4, now = Date.now() / 1000, span = 86400, step = g.step || 300;
-    const xOf = (t) => (W * (1 - (now - t) / span));
     const vals = g.points.map(p => p[1]);
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const pad = Math.max((hi - lo) * 0.15, hi * 0.02, 0.01); lo = Math.max(0, lo - pad); hi = hi + pad;
+    // the scale on both sides: round levels (1, 2, 2.5 or 5 x 10^n apart), in TH/s, or GH/s for a slower miner
+    const gh = Math.max(...vals) < 1, k = gh ? 1000 : 1, FS = opt.big ? 12 : 13, MAXT = opt.big ? 5 : 3;
+    const nice = (r) => { const e = Math.pow(10, Math.floor(Math.log10(r)));      // the round step nearest r
+      return [1, 2, 2.5, 5, 10].map(f => f * e).reduce((a, c) => Math.abs(Math.log(c / r)) < Math.abs(Math.log(a / r)) ? c : a); };
+    let tstep = nice(((hi - lo) * k) / (MAXT - 1)) / k, ticks = [];
+    for (let i = 0; i < 6; i++) {                   // no more levels than fit (3 on a card, 5 on the Miner page)
+      ticks = []; for (let v = Math.ceil(lo / tstep - 1e-9) * tstep; v <= hi + 1e-9; v += tstep) ticks.push(v);
+      if (ticks.length <= MAXT) break;
+      tstep = nice(tstep * k * 2) / k;
+    }
+    const sk = tstep * k; let dec = 0;              // as few decimals as the step needs: 0.5 -> "4.5", 0.25 -> "4.25", 25 -> "525"
+    while (dec < 3 && Math.abs(Math.round(sk * 10 ** dec) - sk * 10 ** dec) > 1e-6) dec++;
+    const tl = (v) => (v * k).toFixed(dec);
+    const LW = Math.max(...ticks.map(v => tl(v).length), 2) * FS * 0.62 + 6;     // room for the longest label
+    const L = LW, R = LW, PW = W - L - R;
+    const xOf = (t) => (L + PW * (1 - (now - t) / span));
     const yOf = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    const scale = ticks.map(v => { const y = yOf(v).toFixed(1);
+      return `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-width="1" stroke-dasharray="1 3" opacity=".8"/>`
+        + `<text x="${L - 4}" y="${y}" dy=".35em" text-anchor="end" font-size="${FS}" fill="var(--muted)" font-family="var(--mono)">${tl(v)}</text>`
+        + `<text x="${W - R + 4}" y="${y}" dy=".35em" text-anchor="start" font-size="${FS}" fill="var(--muted)" font-family="var(--mono)">${tl(v)}</text>`; }).join("");
     // a gap of more than 3 points (no readings: miner off or the app not running) breaks the line
     let d = "", area = "", seg = [];
     const flush = () => {
@@ -409,7 +428,7 @@
     // marks closer than a letter's width share one label (letters side by side, every event in its hover)
     const groups = [];
     (g.markers || []).filter(k => k[0] > now - span).sort((a, b) => a[0] - b[0]).forEach(([t, k, label]) => {
-      const x = Math.max(4, Math.min(W - 4, xOf(t))), last = groups[groups.length - 1];
+      const x = Math.max(L + 4, Math.min(W - R - 4, xOf(t))), last = groups[groups.length - 1];
       if (last && x - last.x < 12) { last.items.push([t, k, label]); if (!last.ks.includes(k)) last.ks.push(k); }
       else groups.push({ x, items: [[t, k, label]], ks: [k] });
     });
@@ -417,7 +436,7 @@
       const x = gr.x.toFixed(1), col = gr.ks.includes("X") ? MK.X : "var(--muted)";
       const tipM = gr.items.map(([t, k, label]) => `${when(t)} · ${k}: ${label}`).join("\n");
       const lbl = gr.ks.join("") + (gr.items.length > gr.ks.length ? "+" : "");
-      const anchor = gr.x > W - 20 ? "end" : gr.x < 20 ? "start" : "middle";
+      const anchor = "middle";
       return `<g><title>${esc(tipM)}</title><line x1="${x}" x2="${x}" y1="${T - 2}" y2="${H - B}" stroke="${col}" stroke-width="1" stroke-dasharray="2 3"/>
         <text x="${x}" y="${T - 4}" text-anchor="${anchor}" font-size="13" font-weight="700" fill="${col}" font-family="var(--mono)">${esc(lbl)}</text>
         <rect x="${(gr.x - 7).toFixed(1)}" y="0" width="14" height="${H}" fill="transparent"/></g>`;
@@ -428,9 +447,9 @@
     const avgSpan = span0 >= 23 ? "24 h" : span0 >= 1 ? `${Math.floor(span0)} h` : `${Math.max(1, Math.round(span0 * 60))} min`;
     return `<div style="grid-column:1/-1" title="${esc(tip)}">${head(`avg ${avgSpan} <b style="color:var(--text)">${fmtTH(g.avg)}</b>`)}
       <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;margin-top:.2rem" role="img" aria-label="hashrate over the last 24 hours">
-        ${grid}<path d="${area}" fill="var(--text)" opacity=".07"/><path d="${d}" fill="none" stroke="var(--text)" stroke-width="1.5" stroke-linejoin="round"/>
+        ${scale}${grid}<path d="${area}" fill="var(--text)" opacity=".07"/><path d="${d}" fill="none" stroke="var(--text)" stroke-width="1.5" stroke-linejoin="round"/>
         <circle cx="${xOf(last[0]).toFixed(1)}" cy="${yOf(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/>${marks}</svg>
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--muted);font-family:var(--mono)">${opt.big
+      <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--muted);font-family:var(--mono);padding:0 ${(100 * R / W).toFixed(2)}% 0 ${(100 * L / W).toFixed(2)}%">${opt.big
         ? "<span>24 h ago</span><span>18 h</span><span>12 h</span><span>6 h</span><span>now</span>" : "<span>24 h ago</span><span>12 h</span><span>now</span>"}</div></div>`;
   };
   // Miner page, Live panel: the value is text (the dashboard escapes it); the "avg since restart" line under it

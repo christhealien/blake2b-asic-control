@@ -39,10 +39,10 @@ ENV SCLITE_WEBUI_HOST=0.0.0.0 \
     SCLITE_WEBUI_MINERS=/data/miners.json \
     SCLITE_TUNER_DATA=/data/tuner \
     PYTHONUNBUFFERED=1 \
-    B2AC_VERSION=1.15.1
+    B2AC_VERSION=1.15.2
 
 LABEL org.opencontainers.image.title="Blake2b ASIC Control" \
-      org.opencontainers.image.version="1.15.1" \
+      org.opencontainers.image.version="1.15.2" \
       org.opencontainers.image.source="https://github.com/christhealien/blake2b-asic-control" \
       org.opencontainers.image.licenses="MIT"
 
