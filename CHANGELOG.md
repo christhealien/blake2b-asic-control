@@ -8,6 +8,12 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.9 (2026-10-08)
+
+- **Efficiency in J/TH** instead of W/TH (the same number: watts per TH/s is joules per TH): Fleet card,
+  Miner page power line, preset cards on Profiles, and the tuner's Finished tests table. The API field names
+  (`w_per_th`) are unchanged. Gallery images re-captured.
+
 ## 1.15.8 (2026-10-08)
 
 - **Widgets redesigned** (`widget_server.py`), checked at Umbrel's phone size (160 x 110) and desktop size

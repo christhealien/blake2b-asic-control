@@ -674,7 +674,7 @@ function renderPresets() {
       <h3>${esc(p.label || k)} ${active ? '<span class="pill ok">on the miner</span>' : ""}</h3>
       <div class="clock">${p.mhz} MHz</div>
       <div class="sub">${p.mv} mV · PV ${p.pv}${Math.floor(p.mhz / 12.5) * 12.5 !== p.mhz ? ` · runs ${Math.floor(p.mhz / 12.5) * 12.5} MHz` : ""}</div>
-      ${p.power ? `<div class="meta" title="Estimate: chips follow clock × PV² (PV is the real board voltage). Calibrate it on the Miner page.">≈ ${p.power.w} W · ${p.power.amps} A${p.power.w_per_th ? ` · ${p.power.w_per_th} W/TH` : ""}</div>` : ""}
+      ${p.power ? `<div class="meta" title="Estimate: chips follow clock × PV² (PV is the real board voltage). Calibrate it on the Miner page.">≈ ${p.power.w} W · ${p.power.amps} A${p.power.w_per_th ? ` · ${p.power.w_per_th} J/TH` : ""}</div>` : ""}
       <div class="meta">${!p.fan_profile ? "Fans: left as they are" : S.profiles[p.fan_profile] && S.profiles[p.fan_profile].tuned
         ? `Fans: its own tuned curve${p.target_c != null ? ` (holds about ${p.target_c} °C)` : ""}` : "Fans: " + esc(profLabel(p.fan_profile))}</div>
       ${p.fan_profile ? spark(p.fan_profile) : ""}

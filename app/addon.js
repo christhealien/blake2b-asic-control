@@ -376,7 +376,7 @@
   window.sclCardInfo = (m) => {
     if (String(m.id).startsWith("demo-")) return "";
     const h = HW[m.id] || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv), hl = h.health;
-    const pw = h.active === "idle" ? "idle: not hashing" : e ? `≈ ${e.w} W · ${e.amps} A` + (e.wth ? ` · ${e.wth} W/TH` : "") : "—";
+    const pw = h.active === "idle" ? "idle: not hashing" : e ? `≈ ${e.w} W · ${e.amps} A` + (e.wth ? ` · ${e.wth} J/TH` : "") : "—";
     const tipP = e ? `Estimate for ${pl.mhz} MHz${e.eff !== pl.mhz ? ` (runs ${e.eff})` : ""} · PV ${pl.pv}, at ${e.mains} V${h.power_model && h.power_model.cal_info ? " · calibrated to your wall reading" : " · not calibrated (Miner page)"}` : "Needs the miner's rated power and stock setting (probe it)";
     const ch = !hl ? `<span class="muted">checking…</span>` : hl.weak.length ? `<span style="color:var(--bad);font-weight:600">${hl.weak.length} weak</span> <span class="muted">${esc(hl.weak.slice(0, 2).join(", "))}</span>`
       : hl.watch.length ? `${hl.watch.length} to watch` : "all healthy";
@@ -671,7 +671,7 @@
     }
     const m = (S().miners || []).find(x => x.id === id) || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv);
     if (h.active === "idle") bits.push(`<span title="The firmware's own Idle mode: the hash boards are off. Any other preset wakes it.">Idle: <b>not hashing</b></span>`);
-    if (e) bits.push(`<span title="PV is the voltage the boards really get; power follows clock × PV²">Power <b>≈ ${e.w} W</b> · ${e.amps} A at ${e.mains} V${e.wth ? ` · ${e.wth} W/TH` : ""}${e.eff !== pl.mhz ? ` · runs ${e.eff} MHz` : ""}
+    if (e) bits.push(`<span title="PV is the voltage the boards really get; power follows clock × PV²">Power <b>≈ ${e.w} W</b> · ${e.amps} A at ${e.mains} V${e.wth ? ` · ${e.wth} J/TH` : ""}${e.eff !== pl.mhz ? ` · runs ${e.eff} MHz` : ""}
       <a href="#" class="scl-cal">${h.power_model && h.power_model.cal_info ? "calibrated" : "calibrate"}</a></span>`);
     bits.push(`<span>Preset <b>${esc(h.preset || "none")}</b></span>`);
     if (bellHtml(id)) bits.push(`<span>${bellHtml(id)}</span>`);

@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.8
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.9
 category: developer
-version: "1.15.8"
+version: "1.15.9"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -46,14 +46,19 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.8
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.8
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.8
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.8
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.8
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.9
 releaseNotes: |-
-  **What's new in 1.15.8**
+  **What's new in 1.15.9**
+
+  - **Efficiency is shown in J/TH** (joules per terahash) instead of W/TH: the same number, in the unit
+    miners are usually rated in. On the Fleet card, the Miner page, the presets and the tuner's tests.
+
+  **1.15.8**
 
   - **Better home-screen widgets.** The miner list now fits each miner's numbers on one line on a phone
     (4.80 TH · 56° · best 945P), so the best share is readable. New **Fleet health** widget: two gauges,
