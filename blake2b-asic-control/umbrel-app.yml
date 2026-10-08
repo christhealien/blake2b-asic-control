@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.7
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.8
 category: developer
-version: "1.15.7"
+version: "1.15.8"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -34,7 +34,7 @@ description: >-
 
   Notifications go to Telegram or Discord: a miner offline, hot, low hashrate, restarted on its
   own, a tuning run finished, a new best-share record, a weak chip or a share rejected for a
-  reason other than stale. Two home-screen widgets show the fleet at a glance.
+  reason other than stale. Three home-screen widgets show the fleet at a glance.
 
 
   Uses the miners' stock web API only: no firmware changes. Sign in with the default username and
@@ -46,14 +46,25 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.7
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.7
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.7
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.7
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.7
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.7
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.8
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.8
 releaseNotes: |-
-  **What's new in 1.15.7**
+  **What's new in 1.15.8**
+
+  - **Better home-screen widgets.** The miner list now fits each miner's numbers on one line on a phone
+    (4.80 TH · 56° · best 945P), so the best share is readable. New **Fleet health** widget: two gauges,
+    hashrate against its own 24-hour average and the hottest board against your heat alert. The overview
+    shows hashrate, miners online (or the tuner's progress), the whole fleet's estimated power and the
+    best share.
+    Add the new widget from Umbrel's widget picker.
+  - **Auto fan control leaves SC Box and HS Box alone:** on those models the miner's own fan control
+    stays in charge (their fan settings don't hold, and each write sets off a long fan spike).
+
+  **1.15.7**
 
   - With **Best share numbers → Both**, the Fleet card shows best share and record on a line each, their
     numbers lined up (the two long values used to wrap raggedly). With one number it stays on one line.
@@ -148,16 +159,33 @@ widgets:
       items:
         - title: "Hashrate"
           text: "10.51"
-          subtext: "TH/s · 2/2 online"
-        - title: "Hottest ASIC"
-          text: "63"
-          subtext: "°C · SC Lite 2"
+          subtext: "TH/s"
+        - title: "Online"
+          text: "2/2"
+          subtext: "miners"
+        - title: "Est. power"
+          text: "1.62"
+          subtext: "kW"
         - title: "Best share"
-          text: "99.7M"
-          subtext: "since restart · SC Lite 1"
-        - title: "Tuner"
-          text: "625"
-          subtext: "MHz · testing 625 MHz"
+          text: "5.42P"
+          subtext: ""
+  - id: "health"
+    type: "two-stats-with-guage"
+    refresh: "30s"
+    endpoint: "web:8788/widgets/health"
+    link: ""
+    example:
+      type: "two-stats-with-guage"
+      link: ""
+      items:
+        - title: "avg 10.6"
+          text: "10.51"
+          subtext: "TH"
+          progress: 0.99
+        - title: "alert 80°"
+          text: "63"
+          subtext: "°C"
+          progress: 0.79
   - id: "miners"
     type: "list"
     refresh: "30s"
@@ -167,9 +195,9 @@ widgets:
       type: "list"
       link: ""
       items:
-        - text: "🟢 SC Lite 1 · Hashing"
-          subtext: "5.45 TH/s · 60 °C · best 99.7 M"
-        - text: "🔧 SC Lite 2 · Tuning · testing 625 MHz"
-          subtext: "5.24 TH/s · 60 °C · best 12.3 M"
-        - text: "🔴 HS Box · Offline"
-          subtext: "not answering for 6 min"
+        - subtext: "🟢 SC Lite 1 · Hashing · High"
+          text: "5.45 TH · 60° · best 5.42P"
+        - subtext: "🔧 SC Lite 2 · Tuning · testing 625 MHz"
+          text: "5.24 TH · 60° · best 52.8T"
+        - subtext: "🔴 HS Box · Offline"
+          text: "not answering"

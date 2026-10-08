@@ -145,6 +145,19 @@ _orig_tick_all = fan_controller.FanController._tick_all
 
 
 def _tick_one(self: Any, mid: str, client: Any, profile: dict, offset: int, st: dict) -> None:
+    # a model whose settings the app can't write yet (SC BOX, HS BOX) is never driven, even if auto fan was switched
+    # on for it before that lock existed: on an HS BOX, cooling the chips below about 54 C raised its hardware errors
+    # (crProductGuy's write tests, 2026-10-07), and every settings write sets off a 10-20 minute fan spike
+    try:
+        row = next((m for m in _srv().load_registry() if _row_id(m) == mid), None)
+        ro = tuner_addon.format_problem((row or {}).get("hardware"))
+    except Exception:
+        ro = None
+    if ro:
+        st["last_poll"] = time.time()
+        st["last_status"] = "read only on this model: the firmware's own fan control is in charge"
+        st["last_applied_fan"] = None
+        return
     if tuner_addon.fan_owner(mid):   # a tuning run is holding this miner's fans
         st["last_poll"] = time.time()
         st["last_status"] = "TUNER is holding the fans"

@@ -34,7 +34,7 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   share rejected for a reason other than stale. Each kind and each miner on or off.
 - **Pools** on several miners at once, **Settings** (account, time zone, best share numbers, notifications, a Miner
   reference explaining the miner's settings, web API, debug pages and port 4028 commands), Light and
-  Dark themes, a phone layout and two Umbrel home-screen widgets.
+  Dark themes, a phone layout and three Umbrel home-screen widgets (overview with estimated fleet power, fleet health gauges, miner list).
 
 ![The tuner maps every clock and voltage](blake2b-asic-control/gallery/2.png)
 ![The Miner page: 24-hour hashrate and every chip](blake2b-asic-control/gallery/3.png)

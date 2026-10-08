@@ -8,6 +8,27 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.15.8 (2026-10-08)
+
+- **Widgets redesigned** (`widget_server.py`), checked at Umbrel's phone size (160 x 110) and desktop size
+  (270 x 150):
+  - **Miners** (list): the top line is the icon, name, status and preset; the bright line is the numbers,
+    kept short enough for one line on a phone (`4.80 TH · 56° · best 945P`; best shares to three figures).
+    Offline miners say "not answering"; an empty fleet says how to add one.
+  - **Fleet health** (new, `two-stats-with-guage`, `/widgets/health`): hashrate against the sum of each
+    online miner's 24-hour average from `hashrate.json` (full gauge = mining as usual), and the hottest board
+    against the heat alert from Settings → Notifications (`notify.hot_c`; full gauge = at the alert).
+  - **Overview** (four-stats): Hashrate, Online (`3/4`, "1 down"; the tuner's progress while a run is on),
+    **Est. power** (replaces Hottest, which the health widget's gauge now shows), Best share. Est. power is the
+    sum over the hashing miners of the Fleet card's estimate (rated watts at the stock plan, scaled by clock x
+    PV^2, with the wall-reading calibration), at each SC Lite's own setting (read over its web API every 2
+    minutes), the tuning step, or the preset. A read-only box with no stock plan on record counts at its rated
+    watts. `1.77+ kW` means a hashing miner of unknown rated power isn't counted. Best share follows Settings →
+    Best share numbers (one number; DATUM's when both are picked).
+- **Auto fan control skips read-only models** (SC Box, HS Box): `_tick_one` reports "read only on this model:
+  the firmware's own fan control is in charge" instead of writing. Tester data showed their fan fields don't
+  hold and every write sets off a 10 to 20 minute fan spike.
+
 ## 1.15.7 (2026-10-07)
 
 - **Fleet card, Best share numbers → Both:** best share and record on a line each, the numbers in one column
