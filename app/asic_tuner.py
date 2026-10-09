@@ -272,6 +272,42 @@ def current_plan() -> Plan:
     return Plan(mhz, mv, pv)
 
 
+def running_state() -> tuple[Plan, dict, str]:
+    """What the miner really runs before a run: (plan, the raw fields to put back, a description).
+    manual on: manualPowerplan. manual off: the selected firmware level (its stock plan, or its Idle mode),
+    and manualPowerplan may hold an old setting that isn't running at all, so putting the miner "back" on
+    it would be wrong: the raw fields (manual, select, manualPowerplan) are what goes back then."""
+    s = patient(sc.get_setting, "read plan")
+    raw = {k: s.get(k) for k in ("manual", "select", "manualPowerplan")}
+    if s.get("manual"):
+        mhz, mv, _a, _b, pv = sc.parse_plan(str(s.get("manualPowerplan")))
+        return Plan(mhz, mv, pv), raw, "its own manual setting"
+    try:
+        sel = int(s.get("select") or 0)
+    except (TypeError, ValueError):
+        sel = 0
+    plans = [p for p in (s.get("powerplans") or []) if isinstance(p, dict)]
+    info = next((str(p.get("info") or "") for p in plans if str(p.get("level")) == str(sel)), "")
+    if not info and 0 <= sel < len(plans):
+        info = str(plans[sel].get("info") or "")
+    try:
+        mhz, mv, _a, _b, pv = sc.parse_plan(info)
+        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan"
+    except Exception:
+        # its Idle mode ("0 MHz 0 V ..."): no clock to tune from; the manual plan stands in for the baseline
+        mhz, mv, _a, _b, pv = sc.parse_plan(str(s.get("manualPowerplan")))
+        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan ({info or 'unknown'})"
+
+
+def restore_raw(raw: dict) -> None:
+    """Put the miner back on exactly the fields it had before the run (manual, select, manualPowerplan)."""
+    def write() -> None:
+        payload = dict(sc.get_setting())
+        payload.update(raw)
+        sc.put_setting(payload)
+    patient(write, "put back the miner's own setting")
+
+
 def bfg_devs() -> list[dict]:
     """The boards from the miner's port-4028 API (no login): clock and voltage as the boards report them."""
     import socket
@@ -286,6 +322,15 @@ def bfg_devs() -> list[dict]:
             raw += chunk
     text = raw.decode("utf-8", "replace").strip("\x00\n ")
     return list((json.loads(text[text.find("{"):text.rfind("}") + 1]) or {}).get("DEVS") or [])
+
+
+def _uptime() -> float | None:
+    """The mining software's uptime from port 4028 (the longest board's Device Elapsed), or None."""
+    try:
+        v = [float(d.get("Device Elapsed")) for d in bfg_devs() if d.get("Device Elapsed") is not None]
+        return max(v) if v else None
+    except Exception:
+        return None
 
 
 def pll(mhz: float) -> float:
@@ -357,11 +402,12 @@ class FanHold:
         if abs(err) > 0.5:
             self.i = max(-60.0, min(60.0, self.i + self.KI * err))
         want = self.base + self.KP * err + self.i
-        if err >= 8:
-            want = self.fan_max            # far too hot: full fan now
         cur = self.fan if self.fan is not None else int(self.base)
-        step = 20 if err > 3 else 10       # faster up than down
-        want = max(cur - 10, min(cur + step, want))
+        if err >= 8:
+            want = self.fan_max            # far too hot: full fan now (not limited to one step up)
+        else:
+            step = 20 if err > 3 else 10   # faster up than down
+            want = max(cur - 10, min(cur + step, want))
         want = int(round(max(self.fan_min, min(self.fan_max, want))))
         if want != self.fan or time.time() - self.sent >= self.RESEND_S:
             self.send(want)
@@ -438,9 +484,18 @@ class Tester:
     def chip_limit(self, k: Key, hours: float, scale: float, n: int = 1) -> float:
         return self.limit(self.base_rate.get(k, 0.0), hours, scale, weak=k in self.weak, n=n)
 
+    NO_TEMP_LIMIT = 10      # readings in a row without any temperature before the run stops (about 5 min)
+
     def heat(self) -> dict:
         snap = patient(sc.board_snapshot, "temperatures")
         t = snap.get("max_t")
+        if t is None:
+            # no temperature means no heat abort and no fan hold: don't keep testing blind
+            self._no_t = getattr(self, "_no_t", 0) + 1
+            if self._no_t >= self.NO_TEMP_LIMIT:
+                raise Abort(f"the miner reported no board temperature for {self._no_t} readings in a row")
+        else:
+            self._no_t = 0
         if t is not None and t >= self.a.abort_c:
             raise Abort(f"board reached {t:.1f} C (abort at {self.a.abort_c} C)")
         if self.fans:
@@ -493,9 +548,26 @@ class Tester:
                           n=len(boards_))
             for b in boards_}
 
+        up0 = _uptime()
+        born0 = time.time() - up0 if up0 is not None else None   # when the mining software last started
         while True:
             time.sleep(a.poll_s)
             snap = self.heat()
+            up = _uptime()
+            # compare the implied start time, not the uptime: a restart behind a long outage can already show
+            # more uptime than the last reading, but it started later
+            if up is not None and born0 is not None and (time.time() - up) > born0 + 90:
+                # the mining software restarted: its error counters started again from zero, so the
+                # test can't be judged clean (and a setting that crashes the miner isn't one to keep)
+                return False, f"the miner restarted during the test (its mining software has been up only {up:.0f} s)", {
+                    "gained": dict(gained), "limits": dict(limits), "worst": max(gained, key=lambda k: gained[k]) if gained else None,
+                    "total": sum(gained.values()), "resets": board_resets, "watched_min": (time.time() - start) / 60.0,
+                    "hold_min": hold_min, "avg_ths": (sum(hr) / len(hr)) if hr else 0.0, "max_t": max_t,
+                    "avg_fan": None, "target_c": self.fans.target if self.fans else None, "decisive": False}
+            if up is not None:
+                up0 = up
+                if born0 is None:
+                    born0 = time.time() - up
             cur, cur_resets = read_icinfo()
             for k, v in cur.items():
                 p = prev.get(k, 0)
@@ -556,6 +628,9 @@ class Tester:
                     if got < want * (1 - a.hash_tol):
                         return False, (f"no chip over its limit, but hashrate {got:.2f} TH/s is "
                                        f"{(1 - got / want) * 100:.0f}% below the {want:.2f} this clock should give"), stats
+                hard, _soft = not_applied(plan)
+                if hard:   # something changed the setting during the test: what was watched isn't this plan
+                    return False, f"the setting changed during the test ({hard})", stats
                 return True, "clean", stats
 
     def baseline(self, plan: Plan) -> None:
@@ -617,9 +692,11 @@ def record(plan: Plan, result: str, reason: str, st: dict, base_rate: dict[Key, 
     w = st["worst"]
     is_base = result == "BASELINE"
     t = now()
+    known = w is not None and w in st["gained"]
     append_row(RESULTS_CSV, RESULTS_HEADER, [
         t, plan.mhz, plan.mv, plan.pv, result, reason, f"{st['watched_min']:.1f}",
-        chip_name(w), st["gained"][w], "" if is_base else f"{st['limits'][w]:.1f}",
+        chip_name(w) if known else "", st["gained"][w] if known else "",
+        "" if is_base or not known else f"{st['limits'][w]:.1f}",
         st["total"], st["resets"], f"{st['avg_ths']:.3f}", f"{st['max_t']:.1f}"])
     for k in sorted(st["gained"]):
         append_row(CHIPS_CSV, CHIPS_HEADER, [
@@ -1047,9 +1124,9 @@ def main() -> None:
             sys.exit(2)
         log("WARNING: untested model; watch the first steps closely")
 
-    cur = current_plan()
+    cur, pre_raw, pre_how = running_state()
     pre = cur   # what the miner ran before this run: where it goes back to unless a setting is confirmed
-    log(f"before the run the miner is on {pre.text()}")
+    log(f"before the run the miner is on {pre.text()} ({pre_how})")
     # PV follows mV with a fixed gap: the miner's own gap unless --pv-offset sets one
     gap = a.pv_offset if a.pv_offset is not None else cur.pv - cur.mv
     log(f"PV = mV {'+' if gap >= 0 else '-'} {abs(gap)} "
@@ -1077,6 +1154,7 @@ def main() -> None:
     tester = Tester(a)
     best: Plan = base
     earned: Plan | None = None   # a setting that passed everything (the confirm, if on): only this replaces `pre`
+    presets_stop = ""            # set if a safety stop cut the presets short
     log(f"files: {RESULTS_CSV}")
     log(f"       {LIVE_CSV}")
     log(f"       {CHIPS_CSV}")
@@ -1354,11 +1432,16 @@ def main() -> None:
                     log(f"PRESETS stopped: {e}")
                     prog.skip_rest("presets", f"not tested: {e}")
                     prog.set("presets", "stop", f"stopped: {e}")
-                apply_plan(earned or pre)   # end on High (or what it ran before)
+                    presets_stop = f"safety stop during the presets: {e}"
+                if earned:
+                    apply_plan(earned)      # end on High
+                elif pre_raw.get("manual"):
+                    apply_plan(pre)
+                # (a miner that ran a firmware level is put back below, in the finally block)
                 if tester.fans:
                     tester.fans.set_target(a.fan_hold_c)
 
-        outcome = ("done", "")
+        outcome = ("aborted", presets_stop) if presets_stop else ("done", "")
     except Abort as e:
         log(f"ABORT: {e}")
         earned = None   # a safety stop: back to what it ran before
@@ -1373,26 +1456,39 @@ def main() -> None:
         signal.signal(signal.SIGINT, signal.SIG_IGN)   # don't let a 2nd stop interrupt the restore
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         final = earned or pre
+        raw_back = final is pre and not pre_raw.get("manual")   # it ran a firmware level (stock or Idle)
+        left = f"its own setting again ({pre_how})" if raw_back else final.text()
         if final is pre:
-            log(f"going back to what the miner ran before the run: {pre.text()}")
+            log(f"going back to what the miner ran before the run: {left if raw_back else pre.text()}")
         try:
-            apply_plan(final)
-            if tester.fans and tester.fans.fan is not None:
+            if raw_back:
+                restore_raw(pre_raw)     # put exactly that back (manual off, its level selected)
+            else:
+                apply_plan(final)
+            # leave the fan where the setting needed it until the dashboard's auto fan takes over again; not
+            # after putting a firmware level back: a fan write turns manual on again (with the old manual plan)
+            if tester.fans and tester.fans.fan is not None and not raw_back:
                 # leave the fan where this setting needed it (or high if unknown) until the
                 # dashboard's auto fan takes over again
                 need = (last_stats.get((final.mhz, final.mv)) or {}).get("avg_fan")
                 tester.fans.send(int(max(a.fan_min, min(100, (need or 75) + 5))))
                 log(f"fan left at {tester.fans.fan}%")
-            log(f"miner left on {final.text()}")
+            log(f"miner left on {left}")
             try:
                 oc = locals().get("outcome") or ("stopped", "stopped")
-                prog.set("finish", "pass", f"miner left on {final.text()}")
+                prog.set("finish", "pass", f"miner left on {left}")
                 prog.finish(oc[0], oc[1])
             except Exception:
                 pass
         except Exception as e:
-            log(f"could not restore the plan ({e}); run: "
-                f"set {final.mhz} MHz / {final.mv} mV on the Miner page")
+            fix = (f"select its {pre_how.replace('the firmware', 'firmware')} again on the miner's own page" if raw_back
+                   else f"set {final.mhz} MHz / {final.mv} mV on the Miner page")
+            log(f"could not restore the plan ({e}); {fix}")
+            try:   # say so on the Tuner page too: the miner may still be on a test setting
+                prog.set("finish", "fail", f"COULD NOT put the miner back on {left}: {fix}")
+                prog.finish("error", f"the miner may still be on a test setting: {fix}")
+            except Exception:
+                pass
             sys.exit(1)
 
     if a.presets_only:
@@ -1404,11 +1500,13 @@ def main() -> None:
             n_ok = 0
         oc = locals().get("outcome") or ("stopped", "stopped")
         head = "PRESETS DONE" if oc[0] == "done" else f"PRESETS STOPPED ({oc[1]})"
-        print(f"\n{head}: {n_ok} of 4 passed; miner back on {final.mhz} MHz at {final.mv} mV (PV {final.pv}), what it ran before")
+        back = left if raw_back else f"{final.mhz} MHz at {final.mv} mV (PV {final.pv})"
+        print(f"\n{head}: {n_ok} of 4 passed; miner back on {back}, what it ran before")
     elif earned:
         print(f"\nBEST: {final.mhz} MHz at {final.mv} mV (PV {final.pv})")
     else:
-        print(f"\nRESTORED: {final.mhz} MHz at {final.mv} mV (PV {final.pv}), what it ran before: nothing new was confirmed")
+        back = left if raw_back else f"{final.mhz} MHz at {final.mv} mV (PV {final.pv})"
+        print(f"\nRESTORED: {back}, what it ran before: nothing new was confirmed")
 
 
 if __name__ == "__main__":

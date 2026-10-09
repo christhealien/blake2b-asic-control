@@ -8,6 +8,79 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.16.1 (2026-10-09)
+
+A full bug sweep: four reviews of the code, a run of every page and API in a test setup (desktop and phone,
+dark and light, bad inputs), short real tuner runs against a fake SC Lite, and an independent review of the fixes.
+
+**Tuner (writes clock and voltage, so these came first)**
+- What the miner ran before a run is read from what it really runs (`manual` off: its selected firmware level,
+  stock or Idle) and put back exactly (`manual`, `select`, `manualPowerplan`), instead of the old manual plan
+  `manualPowerplan` may still hold. No fan write afterwards (it would turn manual back on). The dashboard's
+  "baseline: what it runs now" reads the same way.
+- `entrypoint.sh`: when the dashboard crashes, the tuning runs are stopped properly (so they restore the miner)
+  before the container exits, as on a normal stop. They get up to 110 s (`stop_grace_period` 120 s; StartOS
+  `sigtermTimeout` 120 s).
+- A test fails when the mining software restarted during it (its start time from port 4028's
+  `Device Elapsed` moved) or when the setting changed under it; 10 readings in a row with no temperature stop
+  the run (no heat abort without one); 8 °C over the fan-hold target means full fan at once.
+- The dashboard's auto fan waits during any tuning run (a fan write rewrites the whole plan and could put an
+  old test clock back between the run's own writes).
+- A run's pid file can't be mistaken for another miner's run after a container restart (pids start over): the
+  run's own data folder is checked in `/proc/<pid>/environ`. Two Starts at once can't start two runs.
+- The PV offset you set applies from the baseline on (it used to apply only to presets); the presets-only
+  rebuild uses the curve's usual clock step (an off-grid top clock made it 15 MHz).
+- A failed restore, a run killed before it finished, and a heat stop during the presets now show as such on
+  the Tuner page instead of "finished". The Stop confirm says what it really puts back.
+
+**Talking to miners**
+- `miner_safety.py`: a lock-order deadlock between the miner client's lock and the per-address pacing lock
+  (sign-in took them the other way round) could freeze the fan loop for every miner. Writes (PUT/POST) aren't
+  sent again after a timeout (a pool could be added twice); an oversized reply isn't fetched three times.
+- Restart re-signs in after an expired login and goes through the per-miner pacing.
+- A probe that signs in but can't read the settings backs off instead of probing every 5 s; a failed probe keeps
+  the last good result (a box stays known as read only) and no longer deletes the Idle preset; probe times are
+  stored as Unix time (a time zone change made them look hours in the future).
+- Miner addresses: hex and short IPv4 forms (`0x7f000001`, `0x7f.1`) are refused like `localhost`; names made of
+  hex letters (`cafe42`) are fine.
+- Adding a pool with restart is locked while a miner is tuned; the temperature-control switch is refused on the
+  SC Box / HS Box (and disabled on their Miner page); "Back to pool 0" on several miners skips a tuned one
+  instead of refusing all.
+- The fan target's one-minute guard can't be passed by two clicks at once.
+
+**Presets, fans, schedule, notifications, files**
+- A fan nudge can't push a curve below its 20 % floor; applying a preset resets the nudge.
+- The active preset is cleared when its numbers change (edited, or replaced by a new tuning run) or it no
+  longer passes.
+- Schedule: daylight-saving changes don't re-apply a rule or step back to the previous one (slots in local
+  wall-clock time, and a guard); saving or copying a schedule keeps what the miner ran before a stretch it's
+  in (only while the schedule still goes back); slower restarts and preset changes no longer overwrite each
+  other's saves; a time zone change applies the rule in force in the new zone; capturing "what it runs" reads
+  the firmware level too, and refuses to save an empty one.
+- Notifications: a miner put on Idle after an offline alert no longer stops all its notifications (a
+  `KeyError` every tick); turning channels back on doesn't send a false "restarted" or "back online".
+- `best_shares.json`, `rejects.json`, `hashrate.json`: written so a power cut can't empty them, with a `.bak`
+  copy that's used if the file is damaged (kept aside as `.damaged-<time>`); a file that can't be read isn't
+  saved over.
+- `auth.json`: writes are serialized (a sign-in could undo a password change); a damaged `sessions.json` no
+  longer stops the app from starting.
+
+**Pages**
+- Hashrate graphs: the time labels are clock times in the app's time zone (Settings; `utc_offset_min` in
+  `/api/hardware/list`) at their places on the axis, with "now" at the right; share and mark times use the same
+  zone. The Miner page graph and the rejected-shares strip are drawn to the panel's width, so they read on a
+  phone.
+- Schedule page: a preset name with markup could run script in a block's tooltip (escaped now, and markup is
+  stripped from names on save).
+- Take manual control acted on the miner whose lock was drawn first; the Restart button was covered by the
+  lock; the power estimate used the stored manual plan on a stock-plan miner; "+ New preset" could pre-fill
+  from Idle (0 MHz); the chip map could show the previous miner's chips; the quick bar's Apply could fail
+  silently; the fan curve editor fields fought your typing; the bell toggle threw away unsaved notification
+  edits and an emptied number was saved as 0; clock fields looked unlocked after visiting a box; dark-mode chip
+  numbers were hard to read on mid greys; an older hardware reply could overwrite a newer one.
+- Reports (`report_addon.py`): IPv6 addresses (a link-local one carries the MAC) and pool host:port addresses
+  without a scheme are removed; file names like `server.py:123` and clock times are left alone.
+
 ## 1.16.0 (2026-10-09)
 
 - **SC Box / HS Box fan target** (`fan_addon.py`, Miner page in `addon.js`). Their firmware ignores the

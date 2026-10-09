@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.16.0
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.16.1
 category: developer
-version: "1.16.0"
+version: "1.16.1"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -46,14 +46,33 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.16.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.16.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.16.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.16.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.16.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.16.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.16.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.16.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.16.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.16.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.16.1
 releaseNotes: |-
-  **What's new in 1.16.0**
+  **What's new in 1.16.1**
+
+  A full bug sweep. The most important fixes:
+
+  - **Tuner safety:** a run always puts the miner back on what it really ran before (including its stock
+    plan or Idle, not an old manual setting); it stops properly when the app crashes or updates; a test
+    no longer passes if the miner restarted during it or its setting changed; no temperature readings
+    stops the run; the auto fan no longer writes during a run.
+  - **Hashrate graphs show clock times** (in your time zone from Settings) instead of "24 h ago", with
+    "now" at the right edge. The Miner page graph and the rejected-shares strip read well on phones.
+  - **Schedule:** daylight-saving changes no longer re-apply presets; saving a schedule mid-stretch still
+    goes back to what the miner ran before.
+  - **Notifications** no longer stop for a miner after it was put on Idle.
+  - **Best share history** survives a power cut (a backup copy is kept).
+  - **Privacy:** reports now also remove IPv6 addresses and pool host:port addresses.
+  - Many smaller fixes: Take manual control on the right miner, the power estimate on a stock-plan
+    miner, the quick bar's Apply, the fan curve editor fields, unsaved notification edits, chip map
+    contrast in dark mode, and a rare freeze when two parts of the app talked to one miner at once.
+
+  **1.16.0**
 
   - **Fan target for the SC Box and HS Box.** Their firmware ignores fan numbers and runs its own fan
     loop, holding the control board at a target temperature. The Miner page's fan panel now sets that

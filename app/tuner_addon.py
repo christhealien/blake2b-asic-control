@@ -202,7 +202,10 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _alive(pid: int) -> bool:
+def _alive(pid: int, data_dir: Any = None) -> bool:
+    """Is this pid a running tuner (of this miner, when data_dir is given)? After a container restart pids
+    start from low numbers again, so an old pid file can name another miner's run: each run gets its own
+    SCLITE_TUNER_DATA folder in its environment, which tells them apart."""
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -212,9 +215,16 @@ def _alive(pid: int) -> bool:
     cmd = Path(f"/proc/{pid}/cmdline")
     if cmd.exists():  # guard against the pid being reused by something else
         try:
-            return SCRIPT_TAG in cmd.read_bytes()
+            if SCRIPT_TAG not in cmd.read_bytes():
+                return False
         except OSError:
             return True
+        if data_dir is not None:
+            try:
+                env = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+                return f"SCLITE_TUNER_DATA={data_dir}".encode() in env
+            except OSError:
+                return True
     return True
 
 
@@ -229,8 +239,9 @@ def _reap() -> None:
 
 def running(mid: Any) -> dict[str, Any] | None:
     _reap()
-    info = _read_json(Files(mid).pid)
-    if info and _alive(int(info.get("pid", 0))):
+    f = Files(mid)
+    info = _read_json(f.pid)
+    if info and _alive(int(info.get("pid", 0)), f.dir):
         return info
     return None
 
@@ -244,7 +255,7 @@ def runs() -> dict[str, dict[str, Any]]:
     for pidfile in DATA.glob(f"*/{PREFIX}.pid.json"):
         info = _read_json(pidfile) or {}
         mid = str(info.get("miner_id") or pidfile.parent.name)
-        out[mid] = {"running": bool(info) and _alive(int(info.get("pid", 0))), "info": info}
+        out[mid] = {"running": bool(info) and _alive(int(info.get("pid", 0)), pidfile.parent), "info": info}
     return out
 
 
@@ -298,7 +309,13 @@ def read_live_plan(ip: str, pw: str) -> dict[str, int] | None:
         from miner_client import MinerClient, parse_plan
         s = MinerClient(ip=ip, password=pw).api("GET", "/mcb/setting") or {}
         s = s if isinstance(s, dict) else {}
-        m, v, _a, _b, pv = parse_plan(str(s.get("manualPowerplan") or "")[:200])
+        text = str(s.get("manualPowerplan") or "")
+        if not s.get("manual"):
+            # it runs a firmware level: its stock plan (or Idle), not whatever manualPowerplan still holds
+            sel = str(s.get("select") or 0)
+            plans = [p for p in s.get("powerplans") or [] if isinstance(p, dict)]
+            text = next((str(p.get("info") or "") for p in plans if str(p.get("level")) == sel), "")
+        m, v, _a, _b, pv = parse_plan(text[:200])
         return {"mhz": int(m), "mv": int(v), "pv": int(pv)}
     except Exception:
         return None
@@ -311,9 +328,16 @@ _CONFIRM_PASS = ("PASS (confirm)", "PASS (confirm retest)")
 
 
 def _step_of(values: list[int], default: int) -> int:
+    """The curve's step: the most common gap between its clocks (an off-grid top clock, such as 690 after
+    675, would make the smallest gap 15 and put presets on clocks the curve never measured)."""
+    from collections import Counter
     v = sorted(set(values))
     d = [b - a for a, b in zip(v, v[1:]) if b > a]
-    return min(d) if d else default
+    if not d:
+        return default
+    c = Counter(d).most_common()
+    top = c[0][1]
+    return max(g for g, n in c if n == top)
 
 
 def search_source(mid: Any) -> dict[str, Any]:
@@ -493,7 +517,17 @@ def _start_presets(row: dict[str, Any], body: dict[str, Any], mid: str, ip: str,
     return _spawn(row, mid, ip, pw, args, opts)
 
 
+_start_lock = __import__("threading").Lock()
+
+
 def start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """Start a run. One start at a time: two tabs pressing Start together would otherwise both pass the
+    "already running" check during the seconds the start takes, and start two runs on one miner."""
+    with _start_lock:
+        return _start(row, body)
+
+
+def _start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     mid = str(row.get("id") or row.get("ip") or "")
     if running(mid):
         raise RuntimeError(f"a tuning run is already going on {row.get('name') or mid}")
@@ -608,6 +642,11 @@ def start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError("PV offset must be between -500 and 1000")
         opts["pv_offset"] = pvo
         args += ["--pv-offset", str(pvo)]
+        # the PV you set applies from the baseline on (the search and confirm steps follow the baseline's gap)
+        base["pv"] = base["mv"] + pvo
+        i = args.index("--base-pv")
+        args[i + 1] = str(base["pv"])
+        opts["base_pv"] = base["pv"]
     else:
         opts["pv_offset"] = None
         if pl["source"] == "firmware" and -500 <= pl["pv_gap"] <= 1000:

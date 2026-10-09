@@ -381,7 +381,7 @@ function drawWeek() {
       const t0 = hhmm(k * SLOT), t1 = k === NSLOT - 1 ? "24:00" : hhmm((k + 1) * SLOT);
       const rsAt = (RS[d] || {})[k], marked = marks.has(d * 1440 + k * SLOT);
       cells += `<div class="blk ${sh != null && sh >= 3 && !rest ? "strong" : ""} ${rest ? "rest" : ""} ${k % 2 === 0 && k ? "hr" : ""} ${rsAt ? "rs" : ""}"
-        data-d="${d}" data-k="${k}" data-tip="${esc(`${DAYS[d]} ${t0}–${t1}<br><b>${key == null ? (key0 === BACK ? "nothing scheduled (back to what it ran before)" : "no schedule") : labelOf(key)}</b>${rest ? " (the rest of the time)" : ""}${first ? "<br>switches here" : ""}${rsAt ? `<br>↻ restart at ${rsAt.join(", ")}${marked ? " (marked)" : " (repeat)"}` : ""}`)}"
+        data-d="${d}" data-k="${k}" data-tip="${esc(`${DAYS[d]} ${t0}–${t1}<br><b>${key == null ? (key0 === BACK ? "nothing scheduled (back to what it ran before)" : "no schedule") : esc(labelOf(key))}</b>${rest ? " (the rest of the time)" : ""}${first ? "<br>switches here" : ""}${rsAt ? `<br>↻ restart at ${rsAt.join(", ")}${marked ? " (marked)" : " (repeat)"}` : ""}`)}"
         style="${sh != null ? `background:${rest ? `color-mix(in srgb, var(--ramp-${sh}) 40%, var(--cell-empty))` : `var(--ramp-${sh})`}` : ""}">${first ? esc(short(key)) : ""}</div>`;
     }
     h += `<div class="day ${d === today ? "today" : ""}">${DAYS[d]}</div><div class="blocks">${cells}</div>`;

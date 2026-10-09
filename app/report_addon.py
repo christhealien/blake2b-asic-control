@@ -62,12 +62,27 @@ _jobs: dict[str, dict[str, Any]] = {}
 # ---------------------------------------------------------------- removing private details
 
 _SECRET_KEY = re.compile(r"pass|pwd|token|jwt|secret|wallet|worker|user|pool|url|ssid|wifi|host|e-?mail|"
-                         r"(?:^|[_\s-])(?:ip|mac|sn)(?:$|[_\s-]|addr)|addr|serial|gateway|dns|account|apikey|api_key",
+                         r"(?:^|[_\s-])(?:ip|mac|sn)(?:$|[_\s-]|addr|v[46])|inet6|addr|serial|gateway|dns|account|apikey|api_key",
                          re.I)
 _URL = re.compile(r"\b(?:stratum\+?\w*|tcp|ssl|tls|https?|wss?)://\S+", re.I)
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
 _IPV4 = re.compile(r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?::\d{1,5})?\b")
 _MAC = re.compile(r"\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\b")
+# IPv6 (a link-local fe80:: address carries the MAC): eight groups, or any form with "::". Not clock times
+# like 07:24:31, which have neither.
+def _ipv6_out(m: "re.Match[str]") -> str:
+    """Replace a candidate only if it really is an IPv6 address (not a clock time like 07:24:31)."""
+    import ipaddress
+    try:
+        ipaddress.IPv6Address(m.group(0).split("%")[0])
+        return "<ip removed>"
+    except ValueError:
+        return m.group(0)
+
+
+_IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:%\w+)?(?![\w:])")   # checked below
+# a host with a port and no scheme, like a pool address in a log line ("sc-us.example.tech:700")
+_HOSTPORT = re.compile(r"\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:py|js|c|h|cc|cpp|hpp|go|rs|sh|so|log|txt|json|cfg|conf|ini|html?|css|lua)\b)[A-Za-z]{2,}:\d{2,5}\b")   # not file.py:123
 _LONG = re.compile(r"[A-Za-z0-9_\-=]{24,}")
 _MAC12 = re.compile(r"\b[0-9A-Fa-f]{12}\b")
 _LOG_DROP = re.compile(r"pool|stratum|user|worker|wallet|passw|authori[sz]e|subscri|url|https?:|ssid|wifi|wlan|"
@@ -79,6 +94,8 @@ def scrub_text(s: str) -> str:
     s = _EMAIL.sub("<email removed>", s)
     s = _MAC.sub("00:11:22:33:44:55", s)
     s = _MAC12.sub("001122334455", s)
+    s = _IPV6.sub(_ipv6_out, s)
+    s = _HOSTPORT.sub("<host removed>", s)
     s = _IPV4.sub(lambda m: m.group(0) if m.group(0).startswith(("127.0.0.1", "0.0.0.0")) else "<ip removed>", s)
     return _LONG.sub("<removed>", s)
 

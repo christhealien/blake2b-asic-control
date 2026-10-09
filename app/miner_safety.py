@@ -77,7 +77,14 @@ def _plan_writable(self: Any) -> None:
         raise RuntimeError(FORMAT_REFUSAL)
 
 
+class _TooLarge(RuntimeError):
+    pass
+
+
 def api_bounded(self: Any, method: str, path: str, body: Any = None, retries: int = 3) -> Any:
+    """One web-API call. Locks are always taken in the same order, the client's own lock first and then the
+    miner address's pacing lock (login below does the same), so two threads can't deadlock. A write that may
+    have reached the miner (a timeout after sending) isn't sent again: only a GET is retried then."""
     with self._lock:
         last_err: Exception | None = None
         for _ in range(retries):
@@ -93,7 +100,7 @@ def api_bounded(self: Any, method: str, path: str, body: Any = None, retries: in
                 with _Paced(self.ip), urllib.request.urlopen(req, timeout=20) as r:
                     raw = r.read(MAX_API_BYTES + 1)
                 if len(raw) > MAX_API_BYTES:
-                    raise RuntimeError(f"reply to {path} is too large")
+                    raise _TooLarge(f"reply to {path} is too large")
                 if not raw:
                     return None
                 try:
@@ -106,9 +113,14 @@ def api_bounded(self: Any, method: str, path: str, body: Any = None, retries: in
                     self._token = None
                     continue
                 raise
+            except _TooLarge:
+                raise
             except Exception as e:
                 last_err = e
                 self._token = None
+                refused = isinstance(getattr(e, "reason", None), ConnectionRefusedError) or isinstance(e, ConnectionRefusedError)
+                if method.upper() != "GET" and not refused:
+                    break          # it may have been sent: don't write twice (e.g. add the same pool again)
         raise RuntimeError(f"API {method} {path} failed: {last_err}")
 
 
@@ -174,7 +186,7 @@ def install(cls: Any) -> None:
     orig_login = cls.login
 
     def login(self: Any, *a: Any, **k: Any) -> Any:
-        with _Paced(self.ip):
+        with self._lock, _Paced(self.ip):      # the same order as api_bounded: client lock, then address
             return orig_login(self, *a, **k)
 
     def guarded(name: str) -> Any:
@@ -191,3 +203,63 @@ def install(cls: Any) -> None:
         if hasattr(cls, name):
             setattr(cls, name, guarded(name))
     cls._b2ac_safe = True
+
+
+# ---------------------------------------------------------------- the app's own history files
+_unreadable: set[str] = set()     # files read_json couldn't read (not damaged): never overwritten meanwhile
+
+
+def write_json(path: Any, doc: Any, indent: int | None = None) -> None:
+    """Write a JSON file so a power cut can't leave it empty or half written: a temp file, flushed to disk,
+    renamed over the old one (which is kept first as <name>.bak, the copy read_json falls back to)."""
+    from pathlib import Path
+    p = Path(path)
+    if str(p) in _unreadable:
+        try:
+            p.read_bytes()            # readable again?
+            _unreadable.discard(str(p))
+        except FileNotFoundError:
+            _unreadable.discard(str(p))
+        except OSError:
+            print(f"[files] not saving {p.name}: it couldn't be read, so saving would replace it", flush=True)
+            return
+    tmp = p.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        f.write(json.dumps(doc, indent=indent))
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o600)
+    if p.exists():
+        try:
+            os.replace(p, p.with_suffix(p.suffix + ".bak"))
+        except OSError:
+            pass
+    os.replace(tmp, p)
+
+
+def read_json(path: Any) -> dict:
+    """Read a JSON file written by write_json. A damaged file isn't silently treated as empty (the next save
+    would then wipe it): it's kept aside as <name>.damaged-<time>, and the .bak copy is used instead."""
+    from pathlib import Path
+    p = Path(path)
+    try:
+        doc = json.loads(p.read_text())
+        return doc if isinstance(doc, dict) else {}
+    except FileNotFoundError:
+        pass
+    except ValueError:          # unreadable JSON (or not text): damaged, so keep it aside
+        try:
+            os.replace(p, p.with_name(f"{p.name}.damaged-{int(time.time())}"))
+        except OSError:
+            pass
+        print(f"[files] {p.name} was damaged; kept it aside and using the backup", flush=True)
+    except OSError as e:        # can't read it (permissions, I/O): not damaged, so leave it where it is, and
+        # don't save over it either (write_json skips it) until it can be read again
+        if str(p) not in _unreadable:
+            print(f"[files] couldn't read {p.name} ({e}); using the backup if there is one, and not saving over it", flush=True)
+        _unreadable.add(str(p))
+    try:
+        doc = json.loads(p.with_suffix(p.suffix + ".bak").read_text())
+        return doc if isinstance(doc, dict) else {}
+    except (FileNotFoundError, ValueError, OSError):
+        return {}

@@ -46,6 +46,7 @@
     a.scl-cbtn:hover { border-color: var(--text); }
     .card h3.open { text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
     .scl-lockable { position: relative; }
+    .scl-lockable #btnDetailRestart { position: relative; z-index: 6; }   /* restart isn't locked by a preset */
     .scl-lock { position: absolute; inset: 0; z-index: 5; border-radius: inherit; display: flex; align-items: center;
       justify-content: center; text-align: center; padding: 1rem; background: color-mix(in srgb, var(--panel) 88%, transparent);
       backdrop-filter: blur(1.5px); font-size: .9rem; }
@@ -133,10 +134,26 @@
 
   // ------------------------------------------------------------ shared data
   let HW = {};
+  // times in the app's own time zone (Settings -> Time zone; sent with the hardware list), not the browser's
+  const TZ = { off: null };
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const appClock = (t, day) => {
+    if (TZ.off == null) {
+      const d = new Date(t * 1000);
+      return (day ? DAYS[d.getDay()] + " " : "") + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    }
+    const d = new Date((t + TZ.off * 60) * 1000), p2 = (n) => String(n).padStart(2, "0");
+    return (day ? DAYS[d.getUTCDay()] + " " : "") + `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+  };
   async function loadHw() {
     let changed = false;
+    const seq = loadHw._seq = (loadHw._seq || 0) + 1;     // a slower, older answer must not undo a newer one
     try {
-      const j = (await api("GET", "/api/hardware/list")).miners || {};
+      const resp = await api("GET", "/api/hardware/list");
+      if (seq < (loadHw._applied || 0)) return;
+      loadHw._applied = seq;
+      if (resp.utc_offset_min != null) TZ.off = resp.utc_offset_min;
+      const j = resp.miners || {};
       changed = JSON.stringify(j) !== JSON.stringify(HW);
       for (const [id, h] of Object.entries(j)) {      // a restart just finished: say how it went
         const was = ((HW[id] || {}).restart || {}).state, now = (h.restart || {}).state;
@@ -202,7 +219,7 @@
     ids.forEach(id => Object.entries((HW[id] || {}).presets || {}).forEach(([k, p]) => { labels[k] = labels[k] || p.label; }));
     const ps = $("qbPreset"), cur = ps.value;
     const html = Object.entries(labels).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join("");
-    if (ps._h !== html) { ps.innerHTML = html; ps._h = html; if (cur) ps.value = cur; }
+    if (ps._h !== html) { ps.innerHTML = html; ps._h = html; if (cur) ps.value = cur; if (ps.selectedIndex < 0) ps.selectedIndex = 0; }
     const cs = $("qbCurve"), curC = cs.value, profs = S().profiles || {};
     const chtml = Object.keys(profs).map(k => `<option value="${esc(k)}">${esc(profs[k].label || k)}</option>`).join("");
     if (cs._h !== chtml) { cs.innerHTML = chtml; cs._h = chtml; cs.value = curC || (profs["curve-60"] ? "curve-60" : Object.keys(profs)[0]); }
@@ -219,7 +236,9 @@
     loadHw(); if (window.sclRefresh) window.sclRefresh();
   }
   function applyPresetTicked() {
-    const key = $("qbPreset").value, label = $("qbPreset").selectedOptions[0].textContent;
+    const opt = $("qbPreset").selectedOptions[0];
+    if (!opt) { toast("Pick a preset first", true); return; }
+    const key = opt.value, label = opt.textContent;
     const ids = real(ticked());
     if (!ids.length) return toast("Tick at least one miner first", true);
     if (!confirm(`Put the ${label} preset on ${ids.map(nameOf).join(", ")}?\n\nEach miner uses its own ${label} (its own clock, voltage and fan curve). Miners without a ${label} preset are skipped.`)) return;
@@ -372,7 +391,18 @@
     return { w: Math.round(w), amps: (w / (pm.mains_v || 110)).toFixed(1), wth: ths ? Math.round(w / ths) : null, eff, mains: pm.mains_v || 110 };
   };
   window.sclEstW = estW;
-  const planOf = (m) => { const p = ((m.snapshot || {}).plan) || {}; return { mhz: p.mhz, mv: p.mv, pv: p.pv }; };
+  // the clock / mV / PV the miner really runs: its manual setting when manual is on, else the firmware level it
+  // has selected (its stock plan; Idle has 0 MHz). manualPowerplan can hold an old setting that isn't running.
+  const planOf = (m) => {
+    const sn = m.snapshot || {}, st = sn.setting || {}, p = sn.plan || {};
+    if (st.manual === false && Array.isArray(st.powerplans)) {
+      const lvl = st.powerplans.find(x => x && String(x.level) === String(st.select ?? 0));
+      const mm = /^\s*(\d+)\s*MHz\s+(\d+)\s*V\b.*?PV\s+(\d+)/i.exec(String((lvl || {}).info || ""));
+      if (mm) return { mhz: +mm[1], mv: +mm[2], pv: +mm[3], stock: true };
+      if (lvl && /^\s*0\s*MHz/i.test(String(lvl.info || ""))) return { mhz: 0, mv: 0, pv: 0, stock: true };
+    }
+    return { mhz: p.mhz, mv: p.mv, pv: p.pv };
+  };
   window.sclCardInfo = (m) => {
     if (String(m.id).startsWith("demo-")) return "";
     const h = HW[m.id] || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv), hl = h.health;
@@ -431,7 +461,7 @@
     let grid = "";
     for (let h = 6; h < 24; h += 6) { const x = xOf(now - h * 3600).toFixed(1); grid += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--border)" stroke-width="1"/>`; }
     const MK = { R: "var(--muted)", P: "var(--muted)", T: "var(--muted)", X: "var(--bad)" };
-    const when = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const when = (t) => appClock(t, true);
     // marks closer than a letter's width share one label (letters side by side, every event in its hover)
     const groups = [];
     (g.markers || []).filter(k => k[0] > now - span).sort((a, b) => a[0] - b[0]).forEach(([t, k, label]) => {
@@ -456,8 +486,11 @@
       <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;margin-top:.2rem" role="img" aria-label="hashrate over the last 24 hours">
         ${scale}${grid}<path d="${area}" fill="var(--text)" opacity=".07"/><path d="${d}" fill="none" stroke="var(--text)" stroke-width="1.5" stroke-linejoin="round"/>
         <circle cx="${xOf(last[0]).toFixed(1)}" cy="${yOf(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/>${marks}</svg>
-      <div style="display:flex;justify-content:space-between;font-size:.68rem;color:var(--muted);font-family:var(--mono);padding:0 ${(100 * R / W).toFixed(2)}% 0 ${(100 * L / W).toFixed(2)}%">${opt.big
-        ? "<span>24 h ago</span><span>18 h</span><span>12 h</span><span>6 h</span><span>now</span>" : "<span>24 h ago</span><span>12 h</span><span>now</span>"}</div></div>`;
+      <div style="position:relative;height:1.1em;font-size:.68rem;color:var(--muted);font-family:var(--mono);margin:0 ${(100 * R / W).toFixed(2)}% 0 ${(100 * L / W).toFixed(2)}%">${
+        (opt.big ? [24, 18, 12, 6] : [24, 12]).map(h => {      // the clock time at each grid line, in the app's time zone
+          const pos = (24 - h) / 24 * 100, tx = h === 24 ? "0" : "-50%";
+          return `<span style="position:absolute;left:${pos.toFixed(2)}%;transform:translateX(${tx});white-space:nowrap" title="${h} h ago">${esc(appClock(now - h * 3600, h === 24 && opt.big))}</span>`;
+        }).join("")}<span style="position:absolute;right:0;white-space:nowrap">now</span></div></div>`;
   };
   // Miner page, Live panel: the value is text (the dashboard escapes it); the "avg since restart" line under it
   // is added to the tile after each render
@@ -722,7 +755,13 @@
     }
     for (const pid of ["planMhz", "detailFanAuto"]) {
       const pan = panelOf(pid); if (!pan) continue;
-      pan.querySelectorAll("input, select, button").forEach(x => { if (["detailTc", "btnDetailTc", "btnDetailRestart"].includes(x.id) || x.closest(".scl-ft")) return; if (ro) { x.disabled = true; x.dataset.sclRo = "1"; } else if (x.dataset.sclRo) { x.disabled = false; delete x.dataset.sclRo; } });
+      // restart works on every model; the fan target box is the boxes' own control. Leaving a read-only miner
+      // puts back each control's own state (the dashboard keeps the clock fields locked until you unlock them)
+      pan.querySelectorAll("input, select, button").forEach(x => {
+        if (x.id === "btnDetailRestart" || x.closest(".scl-ft")) return;
+        if (ro) { if (!x.dataset.sclRo) x.dataset.sclRo = x.disabled ? "was" : "1"; x.disabled = true; }
+        else if (x.dataset.sclRo) { x.disabled = x.dataset.sclRo === "was"; delete x.dataset.sclRo; }
+      });
       let n = pan.querySelector(".scl-ro-note");
       if (ro && !n) { n = document.createElement("p"); n.className = "muted scl-ro-note"; n.style.cssText = "margin:0 0 .5rem;font-size:.85rem";
         n.textContent = "Read only on this model: it writes its power plan with volts as a decimal and no PV, which the app can't change yet.";
@@ -757,11 +796,13 @@
     renderHashPanel(id);
   }
 
-  const when = (t) => {
+  const when = (t) => {          // in the app's time zone, like the graphs: the time today, else the day too
     if (!t) return "–";
-    const d = new Date(t * 1000), today = new Date().toDateString() === d.toDateString();
-    return today ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                 : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const dayOf = (x) => TZ.off == null ? new Date(x * 1000).toDateString() : new Date((x + TZ.off * 60) * 1000).toISOString().slice(0, 10);
+    if (dayOf(t) === dayOf(Date.now() / 1000)) return appClock(t, false);
+    if (Date.now() / 1000 - t < 6 * 86400) return appClock(t, true);
+    const d = new Date((t + (TZ.off == null ? -new Date(t * 1000).getTimezoneOffset() : TZ.off) * 60) * 1000);
+    return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()]} ${d.getUTCDate()} ${appClock(t, false)}`;
   };
   const ago = (t) => { const s = Date.now() / 1000 - t; return s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : s < 172800 ? `${(s / 3600).toFixed(1)} h` : `${Math.round(s / 86400)} days`; };
   function renderShares(sh, id) {
@@ -794,7 +835,11 @@
     if (String(id).startsWith("demo-")) { p.hidden = true; return; }
     p.hidden = false;
     const m = { id }, g = (HW[id] || {}).hashrate;
-    const html = window.sclHashGraph(m, { W: 1200, H: 150, big: true }).replace('style="grid-column:1/-1"', "")
+    // drawn at about the panel's real width (on a phone 1200 units shrunk to 330 px made 3 px labels); 4 width
+    // steps, so a resize doesn't redraw it every pixel
+    const pw = Math.max(320, (p.clientWidth || chips.clientWidth || 1200) - 24);
+    const W = pw >= 1000 ? 1200 : pw >= 700 ? 900 : pw >= 480 ? 640 : 420, Hh = W >= 900 ? 150 : W >= 640 ? 140 : 130;
+    const html = window.sclHashGraph(m, { W, H: Hh, big: W >= 640 }).replace('style="grid-column:1/-1"', "")
       + `<p class="muted" style="font-size:.75rem;margin:.4rem 0 0">A point every 5 minutes from the miner's 20-second hashrate${g && g.now != null ? ` (now ${fmtTH(g.now)}${g.since_restart ? `, ${fmtTH(g.since_restart)} on average since its last restart` : ""})` : ""}.
         Marks: <b>R</b> restarted · <b>P</b> setting changed · <b>T</b> tuning started · <b style="color:var(--bad)">X</b> a share rejected, not stale. Hover a mark for when and what.</p>`;
     if (p._last !== html) { p.innerHTML = html; p._last = html; }
@@ -813,16 +858,17 @@
       : r.usual_pct != null && r.covered_h >= 48 ? ` (usual ${pct(r.usual_pct)} %)` : ""));
     return bits.join(" · ");
   }
-  function rejectStrip(r) {
-    const W = 600, H = 52, L = 6, R = 6, y = 20, now = Date.now() / 1000, span = 3 * 86400;
+  function rejectStrip(r, width) {
+    // drawn at about its real width, so the text stays readable on a phone
+    const W = Math.round(Math.max(320, Math.min(600, width || 600))), H = 52, L = 6, R = 6, y = 20, now = Date.now() / 1000, span = 3 * 86400;
     const xOf = (t) => L + (W - L - R) * (1 - (now - t) / span);
     let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="rejected shares, last 3 days">`;
     for (let i = 0; i <= 3; i++) {
       const t = now - i * 86400, x = xOf(t);
       svg += `<line class="grid" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="6" y2="${H - 16}"/>`;
-      if (i > 0 && i < 3) svg += `<text x="${x.toFixed(1)}" y="${H - 3}" text-anchor="middle">${i === 1 ? "24 h ago" : "48 h ago"}</text>`;
+      if (i > 0 && i < 3) svg += `<text x="${x.toFixed(1)}" y="${H - 3}" text-anchor="middle">${esc(appClock(t, true))}</text>`;
     }
-    svg += `<text x="${W - R}" y="${H - 3}" text-anchor="end">now</text><text x="${L}" y="${H - 3}">3 days ago</text>`;
+    svg += `<text x="${W - R}" y="${H - 3}" text-anchor="end">now</text><text x="${L}" y="${H - 3}">${esc(appClock(now - span, true))}</text>`;
     svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${H - 16}" y2="${H - 16}"/>`;
     for (const e of r.events || []) {
       const x = xOf(e.t), tip = `${when(e.t)}${e.at ? ` (miner's log ${e.at.slice(11, 16)})` : ""} · ${e.kind === "stale" ? "stale" : e.kind === "other" ? "rejected, NOT stale" + (e.reason ? ` (${e.reason})` : " (no reason given)") : "not found in the miner's log"}${e.n > 1 ? ` · ×${e.n}` : ""}`;
@@ -843,7 +889,7 @@
     body.className = "rj-line";
     body.innerHTML = `<span class="muted">Since restart:</span> ${(+r.accepted).toLocaleString()} accepted · ${(+r.rejected).toLocaleString()} rejected<br>
       <span class="muted">${esc(span)}:</span> ${rejectWords(r)}`;
-    strip.innerHTML = (r.events || []).length ? rejectStrip(r) : "";
+    strip.innerHTML = (r.events || []).length ? rejectStrip(r, strip.clientWidth || (strip.parentNode || {}).clientWidth) : "";
   }
 
   function applyLocks() {
@@ -852,7 +898,7 @@
     [["detailFanAuto", "Fan control"], ["planMhz", "Clock / voltage"]].forEach(([anchor, what]) => {
       const p = panelOf(anchor); if (!p) return;
       let lock = p.querySelector(".scl-lock");
-      const mode = tuning ? "tuning" : held.length ? "held:" + held.join("|") : "";
+      const mode = tuning ? "tuning:" + id : held.length ? "held:" + id + ":" + held.join("|") : "";   // per miner
       if (!mode) { if (lock) lock.remove(); return; }
       if (lock && lock.dataset.mode === mode) return;
       if (!lock) { lock = document.createElement("div"); lock.className = "scl-lock"; p.appendChild(lock); }
@@ -866,6 +912,8 @@
             schedule until you resume it.<br><button type="button" class="scl-manual" style="margin-top:.6rem">Take manual control</button></div>`;
       const btn = lock.querySelector(".scl-manual");
       if (btn) btn.onclick = async () => {
+        const id = detailId();          // the miner shown now (not the one the lock was first drawn for)
+        if (!id) return;
         if (!confirm(`Take manual control of ${nameOf(id)}?\n\nIts preset turns off and its schedule pauses, so the clock and fans stay where you set them. Apply a preset or resume the schedule to hand control back.`)) return;
         try { await api("POST", "/api/quick/manual", { miner_id: id }); toast(`${nameOf(id)}: manual control`); }
         catch (e) { toast(e.message, true); }
@@ -878,17 +926,25 @@
   let chipData = null, chipFor = null, chipSort = "h";
   async function loadChips(force, fresh) {
     const id = detailId(); if (!id || !$("sclChips")) return;
-    if (String(id).startsWith("demo-")) { $("sclChipsCap").textContent = "Demo miner: no chip data."; $("sclChipMap").innerHTML = ""; $("sclBoardHealth").innerHTML = ""; return; }
+    const clear = (msg) => {         // nothing of another miner's chips may stay on this page
+      $("sclChipsCap").textContent = msg;
+      for (const el of ["sclChipMap", "sclBoardHealth", "sclChipLegend", "sclChipBody"]) if ($(el)) $(el).innerHTML = "";
+      chipData = null; chipFor = null;
+    };
+    if (String(id).startsWith("demo-")) { clear("Demo miner: no chip data."); return; }
     if (!force && chipFor === id && chipData && Date.now() - chipData._at < 60000) return;
     $("sclChipsCap").textContent = "Reading the chips…";
     try {
-      chipData = await api("GET", `/api/hardware/chips?miner=${encodeURIComponent(id)}${fresh ? "&force=1" : ""}`); chipData._at = Date.now();
+      const got = await api("GET", `/api/hardware/chips?miner=${encodeURIComponent(id)}${fresh ? "&force=1" : ""}`);
+      if (detailId() !== id) return;      // another miner was opened meanwhile: its own read draws it
+      chipData = got; chipData._at = Date.now();
       // a miner whose log has no bad-result lines (SC BOX, HS BOX): shade by HW errors, which is what it's judged on
       if (chipFor !== id && $("sclChipMetric")) $("sclChipMetric").value = (chipData.boards || []).length && chipData.boards.every(b => b.judged_on_hw) ? "hw" : "bad";
       chipFor = id;
       renderChips();
-    } catch (e) { $("sclChipsCap").textContent = "Couldn't read the chips: " + e.message; $("sclChipMap").innerHTML = ""; }
+    } catch (e) { if (detailId() === id) clear("Couldn't read the chips: " + e.message); }
   }
+
   const RAMP = [0, 1, 2, 3, 4, 5].map(i => `var(--ramp-${i})`);
   const binR = (r) => Math.min(RAMP.length - 1, Math.max(0, Math.ceil(r * RAMP.length) - 1));
   const HL = { ok: "OK", watch: "watch", weak: "weak" };
@@ -928,7 +984,7 @@
         const [r, txt] = metricOf(c, m, ctx);
         let cls = "cell", style = "";
         if (c.health === "weak") { cls += " over"; weak.push(`board ${b.board} chip ${c.chip}`); }
-        else if (r > 0) { const i = binR(r); style = `background:${RAMP[i]}`; if (i >= 3) cls += " strong"; }
+        else if (r > 0) { const i = binR(r); style = `background:${RAMP[i]}`; if (i >= 2) cls += " strong"; }   // dark text from the mid grey up (readable in both themes)
         if (c.health === "watch") { cls += " ring"; watch.push(`board ${b.board} chip ${c.chip}`); }
         h += `<div class="${cls}" style="${style}" data-k="${b.board},${c.chip}">${c.health === "weak" ? (txt || "!") : txt}</div>`;
       }
@@ -1309,7 +1365,7 @@
       if ($("ntTgTok").value.trim()) b.telegram.bot_token = $("ntTgTok").value.trim();
       if ($("ntDcUrl").value.trim()) b.discord.webhook_url = $("ntDcUrl").value.trim();
       panel.querySelectorAll("[data-ev]").forEach(x => b.events[x.dataset.ev] = x.checked);
-      panel.querySelectorAll("[data-num]").forEach(x => b[x.dataset.num] = Number(x.value));
+      panel.querySelectorAll("[data-num]").forEach(x => { if (x.value.trim() !== "") b[x.dataset.num] = Number(x.value); });   // empty: keep the saved value
       return b;
     };
     const saveAll = async (quiet) => {
@@ -1348,7 +1404,11 @@
     try {
       await api("POST", "/api/notify/miner", { miner_id: id, enabled: e.target.checked });
       toast(e.target.checked ? `Notifications on for ${nameOf(id)}` : `Notifications off for ${nameOf(id)}`);
-      await loadNotify(); if ($("sclNotify")) renderNotify();
+      await loadNotify();
+      // in Settings, tick that miner's box instead of rebuilding the panel (which would lose a token or chat
+      // ID typed but not saved yet)
+      const box = $("sclNotify") && $("sclNotify").querySelector(`[data-nm="${CSS.escape(id)}"]`);
+      if (box) box.checked = e.target.checked;
     } catch (err) { toast(err.message, true); e.target.checked = !e.target.checked; }
   });
 

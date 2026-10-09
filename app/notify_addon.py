@@ -430,6 +430,7 @@ def _check(row: dict[str, Any], c: dict[str, Any], now: float) -> None:
         st["hist"], st["low_since"] = [], None
     if r is None and idle:
         st.pop("down_since", None)                 # the mining software may stop answering while idle
+        st["off_sent"] = False                     # (and no "back online" for it later)
         return
     if r is None:
         st.setdefault("down_since", now)
@@ -437,7 +438,7 @@ def _check(row: dict[str, Any], c: dict[str, Any], now: float) -> None:
             emit(mid, "offline", f"🔴 not answering for {int((now - st['down_since']) / 60)} min", key="offline")
             st["off_sent"] = True
         return
-    if st.get("off_sent"):
+    if st.get("off_sent") and st.get("down_since"):
         emit(mid, "offline", f"🟢 back online after {int((now - st['down_since']) / 60)} min", key="online", recovery=True)
     st.pop("down_since", None)
     st["off_sent"] = False
@@ -501,7 +502,8 @@ def tick() -> None:
             doc = _srv().load_registry_doc()
             c = _cfg(doc)
             if not _channels(c):
-                return
+                _state.clear()      # nothing is watched while no channel is on: start fresh when one is, so
+                return              # an old uptime or outage isn't reported as news
             for m in doc.get("miners") or []:
                 if m.get("demo") or not m.get("ip") or not m.get("notify"):
                     continue

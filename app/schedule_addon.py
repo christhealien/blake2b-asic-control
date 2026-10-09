@@ -28,6 +28,7 @@ from __future__ import annotations
 import datetime as dt
 import re
 import threading
+import datetime as _dt
 import time
 from typing import Any, Callable
 
@@ -87,12 +88,33 @@ def current(rules: list[dict[str, Any]], t: float | None = None) -> dict[str, An
     past = [o for o in occ if o[0] <= mow]
     cur = past[-1] if past else occ[-1]                     # wrap: last one of the week
     ago = (mow - cur[0]) % WEEK_MIN
-    start_ts = int((now - (now % 60)) - ago * 60)           # when this occurrence started
+    # when this occurrence started, counted in local wall-clock time: across a daylight-saving change a
+    # plain "now minus N minutes" would move the start (and the slot id) by an hour, and the rule in force
+    # would be applied again, over a preset you applied by hand
+    start_ts = _wall(now, -ago)
     fut = [o for o in occ if o[0] > mow]
     nxt = fut[0] if fut else occ[0]
     ahead = (nxt[0] - mow) % WEEK_MIN or WEEK_MIN
     return {"rule": rules[cur[1]], "index": cur[1], "slot": start_ts // 60,
-            "since": start_ts, "next_rule": rules[nxt[1]], "next_at": int(now - now % 60 + ahead * 60)}
+            "since": start_ts, "next_rule": rules[nxt[1]], "next_at": _wall(now, ahead)}
+
+
+def _same_or_back(last_slot: float, last_index: Any, c: dict[str, Any]) -> bool:
+    """True when the "new" occurrence is only a daylight-saving shift: the same rule an hour off, or an
+    earlier one coming back in the repeated hour when clocks go back. Then nothing is applied again.
+    (Saving a schedule or changing the time zone clears last_slot, so this never blocks those.)"""
+    d = c["slot"] - last_slot
+    if last_index is not None and c["index"] == last_index and abs(d) <= 60:
+        return True
+    return d < 0       # an occurrence older than the one applied last: the clock went back, not forward
+
+
+def _wall(now: float, minutes: int) -> int:
+    """The time `minutes` of local wall-clock time from now (to the minute), as a Unix time."""
+    lt = time.localtime(now)
+    base = _dt.datetime(lt.tm_year, lt.tm_mon, lt.tm_mday, lt.tm_hour, lt.tm_min)
+    t = (base + _dt.timedelta(minutes=minutes)).timetuple()
+    return int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, 0, 0, 0, -1)))
 
 
 def validate(rules_in: Any, presets: dict[str, Any]) -> list[dict[str, Any]]:
@@ -249,9 +271,9 @@ def _th(n: Any) -> str:
     return "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
 
 
-def _restart_tick(doc: dict[str, Any], now: float) -> bool:
-    """Start the restarts that are due. Returns True if the registry changed."""
-    dirty = False
+def _restart_tick(doc: dict[str, Any], now: float) -> set[str]:
+    """Start the restarts that are due. Returns the miners whose restart state changed."""
+    dirty: set[str] = set()
     for mid, sch in list((doc.get("schedules") or {}).items()):
         cfg = (sch or {}).get("restart")
         if not _on(cfg):
@@ -260,7 +282,7 @@ def _restart_tick(doc: dict[str, Any], now: float) -> bool:
         if not due:
             continue
         cfg["last"] = due[-1]
-        dirty = True
+        dirty.add(mid)
         if tuner_addon.running(mid):
             cfg["last_result"] = {"at": int(now), "ok": False, "msg": "skipped: the miner was being tuned"}
             continue
@@ -337,8 +359,20 @@ def tick() -> None:
     srv = _srv()
     doc = srv.load_registry_doc()
     try:
-        if _restart_tick(doc, now):
-            srv.save_registry_doc(doc)
+        touched = _restart_tick(doc, now)
+        if touched:
+            # the restarts can take a while: save only what they changed (when each last ran, and how it went)
+            # onto a fresh copy, so anything saved meanwhile (a preset change, new restart times) isn't lost
+            fresh = srv.load_registry_doc()
+            for mid in touched:
+                done = ((doc.get("schedules") or {}).get(mid) or {}).get("restart") or {}
+                tgt = ((fresh.get("schedules") or {}).get(mid) or {}).get("restart")
+                if isinstance(tgt, dict) and _on(tgt):
+                    tgt["last"] = max(float(tgt.get("last") or 0), float(done.get("last") or 0))
+                    if done.get("last_result"):
+                        tgt["last_result"] = done["last_result"]
+            srv.save_registry_doc(fresh)
+            doc = fresh
     except Exception as e:
         print(f"[schedule] restarts: {e}", flush=True)
     for mid, sch in list((doc.get("schedules") or {}).items()):
@@ -352,6 +386,9 @@ def tick() -> None:
             continue
         if not c or sch.get("last_slot") == c["slot"]:
             continue
+        last = sch.get("last_slot")
+        if isinstance(last, (int, float)) and _same_or_back(last, sch.get("last_index"), c):
+            continue
         if sch.get("retry_after", 0) > now:
             continue
         key = c["rule"]["preset"]
@@ -359,7 +396,7 @@ def tick() -> None:
         held = sch.get("held")
 
         def run(mid: str = mid, key: str = key, slot: int = c["slot"], has_back: bool = has_back,
-                held: dict | None = held) -> None:
+                held: dict | None = held, index: int = c["index"], rules0: list = list(sch["rules"])) -> None:
             err, new_held, keep = None, held, True
             try:
                 if key == BACK:
@@ -375,6 +412,16 @@ def tick() -> None:
                 err = str(e).strip("'")[:160]
             d = srv.load_registry_doc()
             s = (d.get("schedules") or {}).get(mid)
+            if s is not None and s.get("rules") != rules0:
+                # the schedule was saved anew meanwhile: its rule in force is applied on the next tick, but
+                # what the miner ran before this stretch (if just captured) still belongs to it
+                if key != BACK and new_held and not s.get("held"):
+                    s["held"] = new_held
+                    srv.save_registry_doc(d)
+                elif key == BACK and held and not err and s.get("held") == held:
+                    s.pop("held", None)    # it was just put back: don't let the new schedule put it back again
+                    srv.save_registry_doc(d)
+                s = None
             if s is not None:
                 if err:
                     if not s.get("error"):
@@ -387,7 +434,7 @@ def tick() -> None:
                     if key != BACK and new_held and not held:
                         s["held"] = new_held          # keep what it ran before even if this change failed
                 else:
-                    s.update(last_slot=slot, error=None, retry_after=0,
+                    s.update(last_slot=slot, last_index=index, error=None, retry_after=0,
                              last_applied={"preset": key, "at": int(time.time())})
                     if keep:
                         s["held"] = new_held
@@ -469,6 +516,8 @@ def save(body: dict[str, Any]) -> dict[str, Any]:
     new = {"enabled": enabled, "rules": rules, "paused": old.get("paused") if enabled else None,
            "last_slot": None, "error": None, "retry_after": 0, "last_applied": old.get("last_applied"),
            "restart": restart, "base": base}
+    if old.get("held") and any(r.get("preset") == BACK for r in rules):
+        new["held"] = old["held"]    # what the miner ran before a painted stretch it's in now: still goes back
     doc.setdefault("schedules", {})[mid] = new     # last_slot reset: the rule in force is applied next tick
     srv.save_registry_doc(doc)
     _last_tick[0] = 0
@@ -511,9 +560,12 @@ def copy(body: dict[str, Any]) -> dict[str, Any]:
         rs = {k: v for k, v in (sch.get("restart") or {"every": "off"}).items() if k != "last_result"}
         if _on(rs):
             rs["last"] = time.time()
+        mine = (doc.get("schedules") or {}).get(mid) or {}
         doc.setdefault("schedules", {})[mid] = {"enabled": bool(sch.get("enabled")), "rules": rules, "paused": None,
                                                 "last_slot": None, "error": None, "retry_after": 0, "restart": rs,
                                                 "base": sch.get("base") if (sch.get("base") in _presets_of(doc, mid) or sch.get("base") == BACK) else None}
+        if mine.get("held") and any(r.get("preset") == BACK for r in rules):   # this miner's own "what it ran
+            doc["schedules"][mid]["held"] = mine["held"]                         # before", if it's mid-stretch
         done.append(mid)
     srv.save_registry_doc(doc)
     _last_tick[0] = 0

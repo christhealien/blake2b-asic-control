@@ -55,18 +55,26 @@ _recent_misses: list[float] = []                 # all clients: at most 30 wrong
 
 # ------------------------------------------------------------------ storage ---
 
+_file_lock = threading.RLock()     # every read-change-write of auth.json, so two requests can't undo each other
+
+
 def _load() -> dict[str, Any]:
     try:
-        return json.loads(AUTH_FILE.read_text())
+        doc = json.loads(AUTH_FILE.read_text())
+        return doc if isinstance(doc, dict) else {}
     except (FileNotFoundError, ValueError):
         return {}
 
 
 def _save(doc: dict[str, Any]) -> None:
-    tmp = AUTH_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc))
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, AUTH_FILE)
+    with _file_lock:
+        tmp = AUTH_FILE.with_suffix(f".tmp{threading.get_ident()}")
+        with open(tmp, "w") as f:
+            f.write(json.dumps(doc))
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, AUTH_FILE)
 
 
 def _hash(password: str, salt: bytes, iterations: int = ITERATIONS) -> str:
@@ -79,20 +87,22 @@ def has_account() -> bool:
 
 def _set_account(username: str, password: str) -> None:
     salt = secrets.token_bytes(16)
-    old = _load()
-    _save({"username": username, "salt": salt.hex(), "hash": _hash(password, salt),
-           "iterations": ITERATIONS, "changed": int(time.time()), "acks": old.get("acks") or []})
+    with _file_lock:
+        old = _load()
+        _save({"username": username, "salt": salt.hex(), "hash": _hash(password, salt),
+               "iterations": ITERATIONS, "changed": int(time.time()), "acks": old.get("acks") or []})
     _drop_all_sessions()          # a new or changed login signs everyone out (the caller signs the user back in)
 
 
 def _record_ack(username: str) -> None:
     """Log that this user acknowledged the disclaimer (last 50 kept)."""
-    doc = _load()
-    acks = list(doc.get("acks") or [])
-    acks.append({"user": username, "version": DISCLAIMER_VERSION,
-                 "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
-    doc["acks"] = acks[-50:]
-    _save(doc)
+    with _file_lock:
+        doc = _load()
+        acks = list(doc.get("acks") or [])
+        acks.append({"user": username, "version": DISCLAIMER_VERSION,
+                     "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+        doc["acks"] = acks[-50:]
+        _save(doc)
     _acked.add((username, DISCLAIMER_VERSION))
 
 
@@ -124,8 +134,12 @@ def _check(username: str, password: str) -> bool:
           and hmac.compare_digest(doc["hash"].encode(), good.encode()))
     if ok and n != ITERATIONS:            # upgrade an older, weaker hash now that we know the password
         salt = secrets.token_bytes(16)
-        doc.update(salt=salt.hex(), hash=_hash(password, salt), iterations=ITERATIONS)
-        _save(doc)
+        new_hash = _hash(password, salt)
+        with _file_lock:                  # only if the login is still the one just checked (not changed meanwhile)
+            cur = _load()
+            if cur.get("username") == doc.get("username") and cur.get("hash") == doc.get("hash"):
+                cur.update(salt=salt.hex(), hash=new_hash, iterations=ITERATIONS)
+                _save(cur)
     return ok
 
 
@@ -151,13 +165,18 @@ def _persist() -> None:
 def _load_sessions() -> None:
     try:
         doc = json.loads(SESSIONS_FILE.read_text())
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, ValueError, OSError):
         return
+    if not isinstance(doc, dict):
+        return            # a damaged file: everyone just signs in again
     now = time.time()
     with _lock:
         for k, v in doc.items():
-            if isinstance(v, list) and len(v) == 2 and float(v[1]) > now:
-                _sessions[k] = (str(v[0]), float(v[1]))
+            try:
+                if isinstance(v, list) and len(v) == 2 and float(v[1]) > now:
+                    _sessions[k] = (str(v[0]), float(v[1]))
+            except (TypeError, ValueError):
+                continue
 
 
 def _new_session(username: str) -> str:

@@ -22,6 +22,8 @@ crProductGuy's box tools); this is a separate implementation for this app.
 from __future__ import annotations
 
 import json
+
+import miner_safety
 import os
 import re
 import threading
@@ -55,19 +57,11 @@ def path() -> Path:
 
 
 def load() -> dict[str, Any]:
-    try:
-        doc = json.loads(path().read_text())
-        return doc if isinstance(doc, dict) else {}
-    except (FileNotFoundError, ValueError, OSError):
-        return {}
+    return miner_safety.read_json(path())
 
 
 def _save(doc: dict[str, Any]) -> None:
-    p = path()
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc))
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, p)
+    miner_safety.write_json(path(), doc)
 
 
 def classify(text: str) -> tuple[str, str]:

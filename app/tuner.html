@@ -1104,7 +1104,10 @@ function renderPlan(s) {
   if (!p || !(p.stages || []).length) { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
   const running = !!s.running;
-  const oc = { done: ["finished", "ok"], stopped: ["stopped", ""], aborted: ["safety stop", "bad"], error: ["error", "bad"] }[p.outcome] || ["finished", ""];
+  // no outcome and not running: the run was killed before it could finish (and maybe before it put the
+  // miner's setting back), so say so rather than "finished"
+  const oc = p.outcome == null ? ["ended without finishing: check the miner's setting", "bad"]
+    : ({ done: ["finished", "ok"], stopped: ["stopped", ""], aborted: ["safety stop", "bad"], error: ["error", "bad"] }[p.outcome] || ["finished", ""]);
   $("planState").textContent = running ? "running" : oc[0];
   $("planState").className = "pill " + (running ? "warn" : oc[1]);
   $("planParams").innerHTML = rpParams((s.info || {}).options, p);
@@ -1246,7 +1249,7 @@ function renderMap(d) {
       if (isOver) { cls += " over"; txt = "×"; }
       else if (c[2] > 0) {
         const i = bin(r); style = `background:${RAMP[i]}`;
-        if (i >= 3) cls += " strong";
+        if (i >= 2) cls += " strong";   // dark text from the mid grey up (readable in both themes)
         if (r >= 0.6) txt = c[2];               // label only the chips worth reading
       }
       const lbl = `Board ${c[0]} chip ${c[1]}: ${c[2]} new errors` + (judged && c[3] ? `, limit ${c[3]}` : "");
@@ -1337,7 +1340,7 @@ $("btnStart").onclick = async () => {
   finally { $("btnStart").disabled = false; refresh(); }
 };
 $("btnStop").onclick = async () => {
-  if (!confirm(`Stop the tuning run on ${minerName()}? It will put the best setting found so far back on that miner.`)) return;
+  if (!confirm(`Stop the tuning run on ${minerName()}? It puts back what the miner ran before the run (or the setting the run already confirmed).`)) return;
   try { const j = await api("POST", "/api/tuner/stop", { miner_id: viewId }); toast(j.message); }
   catch (e) { toast(e.message, true); }
   refresh();

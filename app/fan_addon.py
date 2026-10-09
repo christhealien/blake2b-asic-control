@@ -123,8 +123,10 @@ def target_fan(profile: dict[str, Any], temp: float, history: list[float]) -> in
         return _orig_target_fan(profile, temp, history)
     instant = curve_fan(profile.get("points") or [], temp)
     level = int(profile.get("smoothing") or 0)
+    # a nudge (+/- 5 % steps) shifts the curve, but never below the curves' own floor
+    shift = float(profile.get("_offset") or 0)
     if level <= 0:
-        return int(round(max(1, min(100, instant))))
+        return int(round(max(FAN_MIN_PCT, min(100, instant + shift))))
     # same blend the stock "smooth" mode uses: recent readings weigh more
     history.insert(0, instant)
     del history[4 if level == 1 else 10:]
@@ -133,7 +135,7 @@ def target_fan(profile: dict[str, Any], temp: float, history: list[float]) -> in
     # never let smoothing hold the fan below what the current temperature asks for
     # by more than 10 %: heat is dealt with quickly, slowing down is gentle
     out = max(avg, instant - 10)
-    return int(round(max(1, min(100, out))))
+    return int(round(max(FAN_MIN_PCT, min(100, out + shift))))
 
 
 fan_controller.target_fan = target_fan
@@ -158,12 +160,16 @@ def _tick_one(self: Any, mid: str, client: Any, profile: dict, offset: int, st: 
         st["last_status"] = "the firmware's own fan loop is in charge on this model (set its fan target on the Miner page)"
         st["last_applied_fan"] = None
         return
-    if tuner_addon.fan_owner(mid):   # a tuning run is holding this miner's fans
+    if tuner_addon.running(mid):   # a tuning run is on: it holds the fans, or was told to leave them alone
+        # (a fan write rewrites the whole power plan, so one landing between the run's own writes could put an
+        # old test clock back on the miner, even after the run restored it)
         st["last_poll"] = time.time()
-        st["last_status"] = "TUNER is holding the fans"
+        st["last_status"] = "TUNER is holding the fans" if tuner_addon.fan_owner(mid) else "a tuning run is going: auto fan waits"
         st["last_kick_ts"] = 0.0      # re-apply straight away once the run ends
         st["last_applied_fan"] = None
         return
+    if (profile.get("mode") or "").lower() == "curve" and offset:
+        profile, offset = {**profile, "_offset": offset}, 0   # applied (and floored) in target_fan
     add = chip_offset(mid) if _temp_source(mid) == "chip" else None
     if add:
         profile = {**profile, "_temp_add": add}
@@ -299,7 +305,7 @@ def validate_curve(body: dict[str, Any]) -> dict[str, Any]:
     abort_c = num("abort_c", CURVE_DEFAULTS["abort_c"])
     if abort_c <= pts[0]["temp"]:
         raise ValueError("the safety temperature must be above the first point")
-    label = str(body.get("label") or "").strip()[:48]
+    label = re.sub(r"[<>\"'`&]", "", str(body.get("label") or "")).strip()[:48]   # a name, never markup
     if not label:
         raise ValueError("give the curve a name")
     return {
@@ -449,6 +455,13 @@ def import_presets() -> list[str]:
             # a presets-only run puts back what the miner ran before: the OLD numbers of the tuner preset
             # that was on. Say no preset, so nothing claims the new numbers are on the miner.
             row["active_preset"] = None
+        act = row.get("active_preset")
+        if act and act != "idle" and not (mine.get(act) or {}).get("ok"):
+            row["active_preset"] = None      # the preset it pointed at was replaced, dropped or didn't pass
+        elif act and act != "idle":
+            num = lambda p: tuple((p or {}).get(k) for k in ("mhz", "mv", "pv"))
+            if num(old_all.get(act)) != num(mine.get(act)):
+                row["active_preset"] = None  # same name, new numbers: the miner isn't on them (High is set below)
         if high and high.get("ok") and not rebuilt:
             row["active_preset"] = "high"   # the tuner leaves the miner on High
             if high.get("fan_profile"):
@@ -547,7 +560,7 @@ def save_preset(body: dict[str, Any]) -> dict[str, Any]:
     if str(body.get("key") or "") == "idle":
         raise ValueError("Idle is the firmware's own mode and can't be edited")
     mhz, mv, pv = _check_plan(body, row.get("hardware"))
-    label = str(body.get("label") or "").strip()[:32]
+    label = re.sub(r"[<>\"'`&]", "", str(body.get("label") or "")).strip()[:32]   # a name, never markup
     if not label:
         raise ValueError("give the preset a name")
     fan_key = body.get("fan_profile") or None
@@ -574,6 +587,8 @@ def save_preset(body: dict[str, Any]) -> dict[str, Any]:
         new.update(source="manual", ok=True)
     mine[key] = new
     doc.setdefault("presets", {})[mid] = mine
+    if old and changed_clock and row.get("active_preset") == key:
+        row["active_preset"] = None      # the miner still runs the old numbers: apply the preset to run the new ones
     srv.save_registry_doc(doc)
     return {"ok": True, "key": key, "preset": new}
 
@@ -631,7 +646,7 @@ def apply_preset(body: dict[str, Any]) -> dict[str, Any]:
             m["active_preset"] = key
             if p.get("fan_profile"):
                 fc = dict(m.get("fan_control") or {})
-                fc.update(enabled=True, profile=p["fan_profile"])
+                fc.update(enabled=True, profile=p["fan_profile"], fan_offset=0)   # the preset's own curve, unshifted
                 m["fan_control"] = fc
     srv.save_registry_doc(doc)
     return {"ok": True, "plan": s["manualPowerplan"], "fan_profile": p.get("fan_profile")}
@@ -678,7 +693,14 @@ def capture_state(mid: str) -> dict[str, Any]:
         return held
     from miner_client import parse_plan
     s = srv.get_client(mid).api("GET", "/mcb/setting")
-    m, v, _a, _b, pv = parse_plan(str((s or {}).get("manualPowerplan") or ""))
+    if not isinstance(s, dict) or "manual" not in s:
+        raise ValueError("couldn't read what the miner runs now (its settings didn't come back)")
+    if not s.get("manual"):
+        # it runs a firmware level (its stock plan or its Idle mode): manualPowerplan isn't what runs then,
+        # so remember the fields that pick the level and put exactly those back
+        held["raw"] = {k: s.get(k) for k in ("manual", "select", "manualPowerplan")}
+        return held
+    m, v, _a, _b, pv = parse_plan(str(s.get("manualPowerplan") or ""))
     held["plan"] = {"mhz": m, "mv": v, "pv": pv}
     return held
 
@@ -701,6 +723,17 @@ def restore_state(mid: str, held: dict[str, Any]) -> dict[str, Any]:
         s.update(manual=True, select=0, manualPowerplan=build_plan(mhz, mv, fa, fb, pv))
         client.api("PUT", "/mcb/setting", s)
         r = {"ok": True, "plan": s["manualPowerplan"]}
+    elif isinstance(held.get("raw"), dict):
+        client = srv.get_client(mid)
+        s = client.api("GET", "/mcb/setting")
+        if not isinstance(s, dict):
+            raise ValueError("couldn't read the miner's settings")
+        raw = {k: v for k, v in held["raw"].items() if k in ("manual", "select", "manualPowerplan") and v is not None}
+        if "manual" not in raw or "select" not in raw:
+            raise ValueError("the saved setting to go back to is incomplete; set the miner by hand")
+        s.update(raw)
+        client.api("PUT", "/mcb/setting", s)
+        r = {"ok": True, "plan": "its own firmware level"}
     else:
         return {"ok": True}
     doc = srv.load_registry_doc()
@@ -708,6 +741,10 @@ def restore_state(mid: str, held: dict[str, Any]) -> dict[str, Any]:
         if _row_id(m) == mid:
             if not held.get("preset"):
                 m["active_preset"] = None
+                raw = held.get("raw") or {}
+                if raw and not raw.get("manual") and raw.get("select") is not None \
+                        and raw.get("select") == (m.get("hardware") or {}).get("idle_select"):
+                    m["active_preset"] = "idle"      # back in the firmware's Idle mode
             if held.get("fan_control"):
                 m["fan_control"] = held["fan_control"]
     srv.save_registry_doc(doc)
@@ -850,6 +887,7 @@ def _settings_format(s: dict[str, Any]) -> str:
 
 FAN_TARGET_GAP_S = 60     # between two fan-target writes to one miner (a double click, or two tabs)
 _fan_target_last: dict[str, float] = {}
+_fan_target_lock = threading.Lock()
 
 
 def fan_target_problem(hw: dict[str, Any] | None) -> str:
@@ -900,20 +938,25 @@ def set_fan_target(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("give the fan target in whole degrees C") from None
     if not want.is_integer():
         raise ValueError("the fan target is in whole degrees C")
-    left = FAN_TARGET_GAP_S - (time.time() - _fan_target_last.get(mid, 0.0))
-    if left > 0:
-        raise ValueError(f"the fan target was just changed; try again in {int(left) + 1} s")
+    with _fan_target_lock:      # two tabs or a double click: only one write gets through
+        left = FAN_TARGET_GAP_S - (time.time() - _fan_target_last.get(mid, 0.0))
+        if left > 0:
+            raise ValueError(f"the fan target was just changed; try again in {int(left) + 1} s")
+        prev, _fan_target_last[mid] = _fan_target_last.get(mid, 0.0), time.time()
+
+    def refuse(msg: str) -> None:       # nothing was written: the next try needn't wait
+        _fan_target_last[mid] = prev
+        raise ValueError(msg)
     client = _srv().get_client(mid)
     s = client.api("GET", "/mcb/setting")
     ft = _fan_target_of(s if isinstance(s, dict) else {})
     if not ft:
-        raise ValueError("the miner didn't report a fan target just now; press Probe now")
+        refuse("the miner didn't report a fan target just now; press Probe now")
     if not ft["min"] <= want <= ft["max"]:
-        raise ValueError(f"this miner's fan target must be {ft['min']:g} to {ft['max']:g} °C")
+        refuse(f"this miner's fan target must be {ft['min']:g} to {ft['max']:g} °C")
     if _settings_format(s) != "box":
-        raise ValueError("this miner's settings no longer look like an SC Box / HS Box; press Probe now")
+        refuse("this miner's settings no longer look like an SC Box / HS Box; press Probe now")
     before = ft["value"]
-    _fan_target_last[mid] = time.time()
     if want != before:
         s["temp_target"] = int(want)
         client.api("PUT", "/mcb/setting", s)
@@ -939,7 +982,8 @@ def probe_hardware(mid: str) -> dict[str, Any]:
     if not row:
         raise ValueError(f"unknown miner {mid}")
     ip, pw = str(row.get("ip") or ""), str(row.get("password") or "")
-    hw: dict[str, Any] = {"ok": False, "ip": ip, "probed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+    hw: dict[str, Any] = {"ok": False, "ip": ip, "probed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                          "probed_ts": int(time.time())}      # (the retry timer uses this: no time zone in it)
     try:
         from probe import probe_miner
         r = probe_miner(ip, password=pw, try_common_passwords=False, deep=False)
@@ -965,8 +1009,12 @@ def probe_hardware(mid: str) -> dict[str, Any]:
             client = MinerClient(ip=ip, password=pw)
             try:
                 hw["stock"], hw["stock_plans"] = _stock_plans(client, hw)
-            except Exception:
+            except Exception as e:
+                # signed in, but its settings didn't come back: not a finished probe (it's tried again in
+                # PROBE_RETRY_S, not straight away, and nothing treats the model as known meanwhile)
                 hw["stock"], hw["stock_plans"] = None, []
+                hw["ok"] = False
+                hw["error"] = f"signed in, but couldn't read its settings ({type(e).__name__}: {e})"[:160]
             chips = _chips_per_board(client)
             if chips:
                 hw["chips_per_board"] = chips
@@ -978,7 +1026,13 @@ def probe_hardware(mid: str) -> dict[str, Any]:
     doc = srv.load_registry_doc()
     for m in doc.get("miners") or []:
         if _row_id(m) == mid:
-            m["hardware"] = hw
+            old = m.get("hardware") or {}
+            if not hw.get("ok") and old.get("ok") and old.get("ip") == hw.get("ip"):
+                # a probe that failed (miner busy, offline for a moment) doesn't wipe what an earlier probe
+                # found: the model, its plan format (what keeps a box read only), its fan target, its stock plan
+                m["hardware"] = {**old, "last_probe_error": hw.get("error"), "last_probe_at": hw.get("probed_at")}
+            else:
+                m["hardware"] = hw
             pace_for(m)
             _sync_idle_preset(doc, mid, hw)
     srv.save_registry_doc(doc)
@@ -992,8 +1046,10 @@ IDLE_PRESET = {"label": "Idle", "source": "firmware", "idle": True, "ok": True, 
 def _sync_idle_preset(doc: dict[str, Any], mid: str, hw: dict[str, Any]) -> None:
     """An Idle preset for a miner whose firmware has an Idle mode (and whose plans this app can change);
     removed again if a probe no longer finds it."""
+    if not hw.get("ok"):
+        return          # a probe that failed says nothing about the Idle mode: leave the preset as it is
     mine = (doc.setdefault("presets", {})).setdefault(mid, {})
-    has = hw.get("ok") and hw.get("idle_select") is not None and hw.get("plan_format") == "sc-lite"
+    has = hw.get("idle_select") is not None and hw.get("plan_format") == "sc-lite"
     if has and "idle" not in mine:
         mine["idle"] = dict(IDLE_PRESET)
     elif not has and (mine.get("idle") or {}).get("source") == "firmware":
@@ -1041,8 +1097,9 @@ def auto_probe() -> None:
         if hw.get("ip") and hw.get("ip") != m.get("ip"):
             hw = {}                       # moved to a new IP: probe again now
         try:
-            last = time.mktime(time.strptime(hw.get("probed_at", "")[:19], "%Y-%m-%dT%H:%M:%S")) if hw else 0
-        except ValueError:
+            last = float(hw.get("probed_ts") or 0) or (
+                time.mktime(time.strptime(hw.get("probed_at", "")[:19], "%Y-%m-%dT%H:%M:%S")) if hw else 0)
+        except (ValueError, TypeError):
             last = 0
         if hw and now - last < PROBE_RETRY_S:
             continue
@@ -1205,7 +1262,8 @@ def hardware_list() -> dict[str, Any]:
                     "share": shares_addon.card(shares.get(mid)),
                     "rejects": rejects_addon.card(rejects.get(mid)),
                     "hashrate": hashrate_addon.card(mid, rejects_addon.card(rejects.get(mid)))}
-    return {"ok": True, "miners": out}
+    # the app's own time zone (Settings -> Time zone), so the page prints times the way the app counts them
+    return {"ok": True, "miners": out, "utc_offset_min": int(time.localtime().tm_gmtoff // 60)}
 
 
 # ---------------------------------------------------------------- chips (Miner page)
@@ -1261,7 +1319,8 @@ def chips(mid: str, force: bool = False) -> dict[str, Any]:
 # ---------------------------------------------------------------- guard (dashboard's own routes)
 
 LOCKED_WHILE_TUNING = {"fan", "fan_nudge", "tempcontrol", "plan", "restart", "fan_control",
-                       "failback", "make_preferred", "set_pool_order"}   # the last three restart the miner
+                       "failback", "make_preferred", "set_pool_order",   # these three restart the miner
+                       "add_pool"}                                        # (and this one can: preferred + restart)
 # while a preset or a running schedule is in charge of a miner, its clock and fans are locked
 # too, until you take manual control (the Miner page switch, /api/quick/manual)
 LOCKED_BY_PRESET = {"fan", "fan_nudge", "tempcontrol", "plan", "fan_control"}
@@ -1288,6 +1347,10 @@ def take_manual(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("no miner given")
     srv = _srv()
     doc = srv.load_registry_doc()
+    known = {_row_id(m) for m in doc.get("miners") or []}
+    unknown = [i for i in ids if i not in known]
+    if unknown:
+        raise ValueError(f"unknown miner {', '.join(unknown)}")
     for m in doc.get("miners") or []:
         mid = _row_id(m)
         if mid in ids:
@@ -1318,6 +1381,20 @@ def check_address(ip: Any) -> str:
             raise ValueError("the address must be a plain IPv4 address or host name (no port, path or http://)")
         if ip.lower() in ("localhost", "localhost.localdomain"):
             raise ValueError("that address is this machine, not a miner")
+        if re.fullmatch(r"(?:0x[0-9a-f]+|\d+)(?:\.(?:0x[0-9a-f]+|\d+)){0,3}", ip.lower()):
+            # hex / short forms like 0x7f000001 or 0x7f.1 aren't names: they're IPv4 in disguise
+            raise ValueError("write the address as four numbers, like 192.168.1.50")
+        # a name: it must lead to an address a miner can have (not this machine, not link-local)
+        try:
+            import socket as _socket
+            for fam, _t, _p, _c, sa in _socket.getaddrinfo(ip, 80, _socket.AF_INET):
+                r = ipaddress.ip_address(sa[0])
+                if r.is_unspecified or r.is_link_local or r.is_multicast or (r.is_loopback and os.environ.get("SCLITE_ALLOW_LOOPBACK") != "1"):
+                    raise ValueError("that name leads to an address that can't be a miner on your network")
+        except ValueError:
+            raise
+        except OSError:
+            pass          # not resolvable now: it fails later with a clear "no answer"
         return ip
     if a.version != 4:
         raise ValueError("use the miner's IPv4 address")
@@ -1365,7 +1442,7 @@ def guard_post(handler: Any, path: str, body: Any, json_response: Callable) -> b
     else:
         return False
     mids = [m for m in mids if not m.startswith("demo-")]
-    if action in ("plan", "fan", "fan_nudge") or (action == "fan_control" and body.get("enabled")):
+    if action in ("plan", "fan", "fan_nudge", "tempcontrol") or (action == "fan_control" and body.get("enabled")):
         # a model whose power plan the app can't write yet (SC BOX, HS BOX): clock, voltage and fans stay read only
         doc = _srv().load_registry_doc()
         rows = {_row_id(r): r for r in doc.get("miners") or []}
@@ -1387,6 +1464,9 @@ def guard_post(handler: Any, path: str, body: Any, json_response: Callable) -> b
             return True
     if action in LOCKED_WHILE_TUNING:
         busy = [m for m in mids if tuner_addon.running(m)]
+        if busy and path == "/api/fleet/action" and len(busy) < len(mids):
+            body["ids"] = [m for m in mids if m not in busy]   # the miners being tuned are skipped, the rest go
+            busy = []
         if busy:
             json_response(handler, 409, {"ok": False, "locked": busy,
                                          "error": f"locked while tuning: {', '.join(busy)}. The tuner controls "
@@ -1419,29 +1499,40 @@ import miner_client as _mc
 
 
 def _soft_restart(self: Any, timeout: float = 8.0) -> str:
+    """Restart the mining software (PUT /mcb/restart; GET on firmware that wants it). Signs in again once on
+    a 401 (an old token after the miner rebooted), and keeps the per-miner pacing like every other request."""
+    import miner_safety
     notify_addon.note_app_restart(self.ip)     # an uptime drop now isn't "restarted on its own"
+    last: Exception | None = None
+    relogged = False
     with self._lock:
         if self._token is None:
             self.login()
-        tok = self._token
-    last: Exception | None = None
-    for method in ("PUT", "GET"):
-        req = urllib.request.Request(self.host() + "/mcb/restart", data=b"" if method == "PUT" else None,
-                                     headers={"Authorization": tok, "Accept": "*/*"}, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                r.read()
-                return f"restart HTTP {getattr(r, 'status', 200)} ({method})"
-        except urllib.error.HTTPError as e:
-            if method == "PUT" and e.code in (400, 404, 405, 501):
-                last = e
-                continue
-            raise
-        except Exception as e:   # the connection usually drops as the restart starts
-            msg = str(e).lower()
-            if any(x in msg for x in ("closed", "reset", "timed out", "timeout", "refused", "remote end", "aborted")):
-                return f"restart requested ({type(e).__name__})"
-            raise
+        methods = ["PUT", "GET"]
+        while methods:
+            method = methods[0]
+            req = urllib.request.Request(self.host() + "/mcb/restart", data=b"" if method == "PUT" else None,
+                                         headers={"Authorization": self._token, "Accept": "*/*"}, method=method)
+            try:
+                with miner_safety._Paced(self.ip), urllib.request.urlopen(req, timeout=timeout) as r:
+                    r.read()
+                    return f"restart HTTP {getattr(r, 'status', 200)} ({method})"
+            except urllib.error.HTTPError as e:
+                if e.code == 401 and not relogged:
+                    relogged = True
+                    self._token = None
+                    self.login()
+                    continue
+                if method == "PUT" and e.code in (400, 404, 405, 501):
+                    last = e
+                    methods.pop(0)
+                    continue
+                raise
+            except Exception as e:   # the connection usually drops as the restart starts
+                msg = str(e).lower()
+                if any(x in msg for x in ("closed", "reset", "timed out", "timeout", "refused", "remote end", "aborted")):
+                    return f"restart requested ({type(e).__name__})"
+                raise
     raise last or RuntimeError("restart not accepted")
 
 
@@ -1762,10 +1853,15 @@ def set_tz(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unknown time zone {name!r}: pick one from the list (like Asia/Tokyo or America/New_York)")
     srv = _srv()
     doc = srv.load_registry_doc()
+    old = doc.get("timezone")
     if name:
         doc["timezone"] = name
     else:
         doc.pop("timezone", None)
+    if (name or None) != old:
+        for sch in (doc.get("schedules") or {}).values():   # the week's blocks now sit at other times: the
+            if isinstance(sch, dict):                         # rule in force in the new zone applies next tick
+                sch["last_slot"], sch["last_index"] = None, None
     srv.save_registry_doc(doc)
     _apply_tz(name or _TZ_DEFAULT)
     return tz_state()
@@ -1822,6 +1918,8 @@ def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
         mid = (q.get("miner") or [""])[0]
         try:
             json_response(handler, 200, chips(mid, force=(q.get("force") or [""])[0] == "1"))
+        except ValueError as e:      # an unknown miner, or bad input
+            json_response(handler, 400, {"ok": False, "error": str(e).strip("'")[:200]})
         except Exception as e:
             json_response(handler, 502, {"ok": False, "error": str(e).strip("'")[:200]})
         return True
@@ -1959,7 +2057,10 @@ def _tighten_permissions() -> None:
     # only the tuner's own data folder, and only when it's set (not "." when it isn't), never through a link
     tdir = (os.environ.get("SCLITE_TUNER_DATA") or "").strip()
     if tdir and os.path.isdir(tdir) and not os.path.islink(tdir):
-        os.chmod(tdir, 0o700)
+        try:
+            os.chmod(tdir, 0o700)
+        except OSError:
+            pass          # (owned by another user, e.g. made as root by an older image): don't stop the app
         for root, dirs, files in os.walk(tdir, followlinks=False):
             for name in dirs + files:
                 p = os.path.join(root, name)

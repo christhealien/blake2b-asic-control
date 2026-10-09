@@ -537,14 +537,17 @@ function renderPointTable() {
   });
   $("ptable").querySelectorAll("[data-del]").forEach(b => b.onclick = () => removePoint(Number(b.dataset.del)));
   for (const [id, k] of [["cvAbort", "abort_c"], ["cvCool", "cooldown_s"], ["cvPoll", "poll_s"]]) {
-    $(id).value = cv[k]; $(id).disabled = !ed;
+    if (document.activeElement !== $(id)) $(id).value = cv[k];   // not while you're typing in it
+    $(id).disabled = !ed;
   }
   $("cvSmooth").value = String(cv.smoothing || 0); $("cvSmooth").disabled = !ed;
   $("cvTc").checked = cv.force_tempcontrol_on !== false; $("cvTc").disabled = !ed;
   $("btnAddPt").disabled = !ed || cv.points.length >= 8;
 }
 for (const [id, k] of [["cvAbort", "abort_c"], ["cvCool", "cooldown_s"], ["cvPoll", "poll_s"]])
-  $(id).addEventListener("input", () => { cv[k] = Number($(id).value); changed(); });
+  $(id).addEventListener("input", () => { if ($(id).value.trim() === "") return; cv[k] = Number($(id).value); changed(); });
+for (const [id, k] of [["cvAbort", "abort_c"], ["cvCool", "cooldown_s"], ["cvPoll", "poll_s"]])
+  $(id).addEventListener("change", () => { if ($(id).value.trim() === "" && cv) $(id).value = cv[k]; });   // left empty: keep the old value
 $("cvSmooth").onchange = () => { cv.smoothing = Number($("cvSmooth").value); changed(); };
 $("cvTc").onchange = () => { cv.force_tempcontrol_on = $("cvTc").checked; changed(); };
 $("cvLabel").addEventListener("input", () => { if (cv) { cv.label = $("cvLabel").value; changed(); } });
@@ -706,7 +709,7 @@ function editPreset(k) {
   const m = miner(); if (!m) return;
   pfKey = k || "";
   const p = k ? m.presets[k] : null;
-  const any = Object.values(m.presets || {})[0];
+  const any = Object.values(m.presets || {}).find(x => x && !x.idle && x.mhz > 0 && x.mv > 0);   // not Idle (0 MHz)
   const stock = (m.hardware && m.hardware.stock) || { mhz: 625, mv: 9100, pv: 9400 };   // from the probe
   pfGap = p ? p.pv - p.mv : (any ? any.pv - any.mv : stock.pv - stock.mv);
   $("pfTitle").textContent = p ? `Edit ${p.label}` : `New preset for ${m.name}`;

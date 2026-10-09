@@ -18,6 +18,8 @@ The widget server reads the same file.
 from __future__ import annotations
 
 import json
+
+import miner_safety
 import os
 import threading
 import time
@@ -46,18 +48,11 @@ def path() -> Path:
 
 
 def load() -> dict[str, Any]:
-    try:
-        doc = json.loads(path().read_text())
-        return doc if isinstance(doc, dict) else {}
-    except (FileNotFoundError, ValueError, OSError):
-        return {}
+    return miner_safety.read_json(path())      # a damaged file falls back to the backup, never to nothing
 
 
 def _save(doc: dict[str, Any]) -> None:
-    p = path()
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc, indent=1))
-    os.replace(tmp, p)
+    miner_safety.write_json(path(), doc, indent=1)
 
 
 # The miner counts share difficulty in the old unit where difficulty 1 = 2^32 hashes (checked on an SC Lite:

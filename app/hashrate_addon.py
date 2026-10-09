@@ -14,6 +14,8 @@ hashrate.json next to miners.json, so the graph survives an app restart; a stret
 from __future__ import annotations
 
 import json
+
+import miner_safety
 import os
 import threading
 import time
@@ -38,11 +40,7 @@ def path() -> Path:
 def _load() -> dict[str, Any]:
     global _doc
     if _doc is None:
-        try:
-            d = json.loads(path().read_text())
-            _doc = d if isinstance(d, dict) else {}
-        except (FileNotFoundError, ValueError, OSError):
-            _doc = {}
+        _doc = miner_safety.read_json(path())
     return _doc
 
 
@@ -51,12 +49,8 @@ def _save(force: bool = False) -> None:
     if not force and now - _saved[0] < SAVE_EVERY_S:
         return
     _saved[0] = now
-    p = path()
-    tmp = p.with_suffix(".tmp")
     try:
-        tmp.write_text(json.dumps(_doc or {}))
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, p)
+        miner_safety.write_json(path(), _doc or {})
     except OSError:
         pass
 
