@@ -8,6 +8,15 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.16.2 (2026-10-09)
+
+- **Graph time labels on full hours** (`addon.js`, `hourTicks`): instead of the time at fixed offsets from now
+  (which gave labels like 03:59), the hashrate graphs mark full hours of the app's time zone where they fall
+  (every 6 h on the Miner page, every 12 h on a card), with grid lines at the same places, the day at midnight
+  ("Fri 00:00") and "now" at the right edge; labels too close to an edge are left out. The rejected-shares strip
+  marks each midnight. 24-hour time everywhere (`hour12: false` as well as `hourCycle: "h23"`, which some
+  browsers ignore on its own).
+
 ## 1.16.1 (2026-10-09)
 
 A full bug sweep: four reviews of the code, a run of every page and API in a test setup (desktop and phone,

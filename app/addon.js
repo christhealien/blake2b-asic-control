@@ -140,11 +140,23 @@
   const appClock = (t, day) => {
     if (TZ.off == null) {
       const d = new Date(t * 1000);
-      return (day ? DAYS[d.getDay()] + " " : "") + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+      return (day ? DAYS[d.getDay()] + " " : "") + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23", hour12: false });
     }
     const d = new Date((t + TZ.off * 60) * 1000), p2 = (n) => String(n).padStart(2, "0");
     return (day ? DAYS[d.getUTCDay()] + " " : "") + `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
   };
+  // Full hours inside the last `span` seconds, every `every` hours of the app's clock (its time zone from
+  // Settings; the browser's until the first hardware list arrives). Left out next to the edges, where "now"
+  // and the graph's start sit, so labels never crowd them.
+  function hourTicks(now, span, every) {
+    const off = TZ.off != null ? TZ.off * 60 : -new Date().getTimezoneOffset() * 60, out = [];
+    for (let t = Math.ceil((now - span + off) / 3600) * 3600 - off; t < now; t += 3600) {
+      const local = new Date((t + off) * 1000), hh = local.getUTCHours();
+      if (hh % every || now - t < span * 0.07 || t - (now - span) < span * 0.04) continue;
+      out.push({ t, hh, day: DAYS[local.getUTCDay()], label: `${String(hh).padStart(2, "0")}:00` });
+    }
+    return out;
+  }
   async function loadHw() {
     let changed = false;
     const seq = loadHw._seq = (loadHw._seq || 0) + 1;     // a slower, older answer must not undo a newer one
@@ -459,7 +471,10 @@
     };
     g.points.forEach((p, i) => { if (i && p[0] - g.points[i - 1][0] > 3 * step) flush(); seg.push(p); }); flush();
     let grid = "";
-    for (let h = 6; h < 24; h += 6) { const x = xOf(now - h * 3600).toFixed(1); grid += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--border)" stroke-width="1"/>`; }
+    // the time axis: full hours in the app's time zone (every 6 h on the Miner page, every 12 h on a card),
+    // moving left as time goes on; "now" stays at the right edge
+    const hrs = hourTicks(now, span, opt.big ? 6 : 12);
+    for (const tk of hrs) { const x = xOf(tk.t).toFixed(1); grid += `<line x1="${x}" x2="${x}" y1="${T}" y2="${H - B}" stroke="var(--border)" stroke-width="1"/>`; }
     const MK = { R: "var(--muted)", P: "var(--muted)", T: "var(--muted)", X: "var(--bad)" };
     const when = (t) => appClock(t, true);
     // marks closer than a letter's width share one label (letters side by side, every event in its hover)
@@ -487,9 +502,9 @@
         ${scale}${grid}<path d="${area}" fill="var(--text)" opacity=".07"/><path d="${d}" fill="none" stroke="var(--text)" stroke-width="1.5" stroke-linejoin="round"/>
         <circle cx="${xOf(last[0]).toFixed(1)}" cy="${yOf(last[1]).toFixed(1)}" r="2.2" fill="var(--text)"/>${marks}</svg>
       <div style="position:relative;height:1.1em;font-size:.68rem;color:var(--muted);font-family:var(--mono);margin:0 ${(100 * R / W).toFixed(2)}% 0 ${(100 * L / W).toFixed(2)}%">${
-        (opt.big ? [24, 18, 12, 6] : [24, 12]).map(h => {      // the clock time at each grid line, in the app's time zone
-          const pos = (24 - h) / 24 * 100, tx = h === 24 ? "0" : "-50%";
-          return `<span style="position:absolute;left:${pos.toFixed(2)}%;transform:translateX(${tx});white-space:nowrap" title="${h} h ago">${esc(appClock(now - h * 3600, h === 24 && opt.big))}</span>`;
+        hrs.map(tk => {      // each full hour at its grid line, in the app's time zone (the day at midnight)
+          const pos = (tk.t - (now - span)) / span * 100;
+          return `<span style="position:absolute;left:${pos.toFixed(2)}%;transform:translateX(-50%);white-space:nowrap">${esc(tk.hh === 0 ? tk.day + " 00:00" : tk.label)}</span>`;
         }).join("")}<span style="position:absolute;right:0;white-space:nowrap">now</span></div></div>`;
   };
   // Miner page, Live panel: the value is text (the dashboard escapes it); the "avg since restart" line under it
@@ -863,12 +878,12 @@
     const W = Math.round(Math.max(320, Math.min(600, width || 600))), H = 52, L = 6, R = 6, y = 20, now = Date.now() / 1000, span = 3 * 86400;
     const xOf = (t) => L + (W - L - R) * (1 - (now - t) / span);
     let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="rejected shares, last 3 days">`;
-    for (let i = 0; i <= 3; i++) {
-      const t = now - i * 86400, x = xOf(t);
-      svg += `<line class="grid" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="6" y2="${H - 16}"/>`;
-      if (i > 0 && i < 3) svg += `<text x="${x.toFixed(1)}" y="${H - 3}" text-anchor="middle">${esc(appClock(t, true))}</text>`;
+    for (const tk of hourTicks(now, span, 24)) {      // the start of each day (midnight in the app's time zone)
+      const x = xOf(tk.t);
+      svg += `<line class="grid" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="6" y2="${H - 16}"/>`
+        + `<text x="${x.toFixed(1)}" y="${H - 3}" text-anchor="middle">${esc(tk.day)} 00:00</text>`;
     }
-    svg += `<text x="${W - R}" y="${H - 3}" text-anchor="end">now</text><text x="${L}" y="${H - 3}">${esc(appClock(now - span, true))}</text>`;
+    svg += `<text x="${W - R}" y="${H - 3}" text-anchor="end">now</text>`;
     svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${H - 16}" y2="${H - 16}"/>`;
     for (const e of r.events || []) {
       const x = xOf(e.t), tip = `${when(e.t)}${e.at ? ` (miner's log ${e.at.slice(11, 16)})` : ""} · ${e.kind === "stale" ? "stale" : e.kind === "other" ? "rejected, NOT stale" + (e.reason ? ` (${e.reason})` : " (no reason given)") : "not found in the miner's log"}${e.n > 1 ? ` · ×${e.n}` : ""}`;
@@ -1359,7 +1374,7 @@
         || `<span class="muted">No miners yet.</span>`}</div>
       <div class="row" style="margin-top:.7rem"><button type="button" class="primary" id="ntSave">Save notifications</button></div>
       ${n.log.length ? `<details style="margin-top:.6rem"><summary class="muted">Last ${n.log.length} messages (sent or failed)</summary><div class="nt-log">${n.log.map(l =>
-        `${esc(new Date(l.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }))} · ${esc(l.channel)} · ${l.ok ? "sent" : "FAILED " + esc(l.error)} · ${esc(l.text)}`).join("<br>")}</div></details>` : ""}`;
+        `${esc(new Date(l.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", hour12: false }))} · ${esc(l.channel)} · ${l.ok ? "sent" : "FAILED " + esc(l.error)} · ${esc(l.text)}`).join("<br>")}</div></details>` : ""}`;
     const body = () => {
       const b = { telegram: { enabled: $("ntTgOn").checked, chat_id: $("ntTgChat").value.trim() }, discord: { enabled: $("ntDcOn").checked }, events: {} };
       if ($("ntTgTok").value.trim()) b.telegram.bot_token = $("ntTgTok").value.trim();

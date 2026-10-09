@@ -232,8 +232,8 @@ const EVERY = [["off", "Off"], ["hour", "Every hour"], ["6h", "Every 6 hours"], 
 const RS_BRUSH = "__restart";
 const miner = () => (S && S.miners.find(m => m.id === minerId)) || null;
 const hm = (s) => { const [h, m] = String(s).split(":").map(Number); return h * 60 + m; };
-const fmtD = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-const fmt = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+const fmtD = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", hour12: false });
+const fmt = (ts) => new Date(ts * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", hour12: false });
 function shadeOf(key) {
   if (key in SHADE) return SHADE[key];
   const others = Object.keys((miner() || {}).presets || {}).filter(k => !(k in SHADE)).sort();
