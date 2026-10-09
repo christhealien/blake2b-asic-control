@@ -8,6 +8,26 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.16.0 (2026-10-09)
+
+- **SC Box / HS Box fan target** (`fan_addon.py`, Miner page in `addon.js`). Their firmware ignores the
+  fan fields of the power plan and runs its own fan loop (every 6 s, logged in `/dbg/fanctrllog`), steering
+  the fans so the control board's sensor holds `temp_target`, clamped to `temp_targets` (SC Box 65–75 °C,
+  HS Box 70–80 °C). That target is the one fan setting these models take, so:
+  - The probe stores it as `hardware.fan_target` (`value`, `min`, `max`).
+  - `GET /api/hardware/fan_target?miner=` reads it live; `POST /api/hardware/fan_target`
+    (`miner_id`, `target`) writes it: whole degrees inside the miner's own range, at least 60 s between two
+    writes to one miner, only for plan format `box` with a fan target range (every other model gets an
+    error and keeps the app's own fan control). The settings are read fresh and sent back with only
+    `temp_target` changed (the stock page's Save resets a manual clock to the stock plan; this doesn't), then
+    read again to confirm the miner kept it. The last write is kept in `miners.json` as `fan_target_set`.
+  - The Miner page's fan panel shows a **Fan target** box for these models instead of the curve and fan %
+    controls (still read only there); the info line shows the target and the range.
+  - The auto-fan status for these models now says the firmware's own fan loop is in charge.
+  - Tested by crProductGuy with `fan_target_test.py` and his own box tools: the target holds and the fan loop
+    switches to it within seconds on both models; the SC Box's fans run near full speed for about 15 minutes
+    after a settings write, the HS Box's didn't change speed.
+
 ## 1.15.9 (2026-10-08)
 
 - **Efficiency in J/TH** instead of W/TH (the same number: watts per TH/s is joules per TH): Fleet card,

@@ -155,7 +155,7 @@ def _tick_one(self: Any, mid: str, client: Any, profile: dict, offset: int, st: 
         ro = None
     if ro:
         st["last_poll"] = time.time()
-        st["last_status"] = "read only on this model: the firmware's own fan control is in charge"
+        st["last_status"] = "the firmware's own fan loop is in charge on this model (set its fan target on the Miner page)"
         st["last_applied_fan"] = None
         return
     if tuner_addon.fan_owner(mid):   # a tuning run is holding this miner's fans
@@ -794,6 +794,7 @@ def _stock_plans(client: Any, hw: dict[str, Any] | None = None) -> tuple[dict[st
     if hw is not None:
         hw.update(running_plan(s, flat))
         hw["plan_nested"] = nested
+        hw["fan_target"] = _fan_target_of(s)
         try:
             m, v, _a, _b, pv = parse_plan(hw.get("running_text") or "")
             hw["current"] = {"mhz": m, "mv": v, "pv": pv}
@@ -821,6 +822,114 @@ def _stock_plans(client: Any, hw: dict[str, Any] | None = None) -> tuple[dict[st
             plans.append({"level": int(p.get("level") or 0), "mhz": mhz, "mv": mv, "pv": pv})
     stock = next((dict(mhz=p["mhz"], mv=p["mv"], pv=p["pv"]) for p in plans if p["level"] == 0), None)
     return stock, plans
+
+
+def _fan_target_of(s: dict[str, Any]) -> dict[str, Any] | None:
+    """The firmware fan loop's target from /mcb/setting: temp_target inside temp_targets ([low, high] in C),
+    or None when the miner doesn't report one."""
+    rng, val = s.get("temp_targets"), s.get("temp_target")
+    try:
+        lo, hi, v = float(rng[0]), float(rng[1]), float(val)
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+    if not 0 < lo < hi <= 120:
+        return None
+    return {"value": v, "min": lo, "max": hi}
+
+
+def _settings_format(s: dict[str, Any]) -> str:
+    """The plan format of every plan text in /mcb/setting (manualPowerplan and each power plan, nested per
+    algorithm on the HS Box): 'box' only when they're all box-style (the "0 MHz 0 V" off plans are left out)."""
+    texts = [s.get("manualPowerplan")]
+    for p in s.get("powerplans") or []:
+        if isinstance(p, dict):
+            texts += [m.get("info") for m in p.get("mode") or [] if isinstance(m, dict)] if isinstance(p.get("mode"), list) else [p.get("info")]
+    forms = {tuner_addon.plan_format(t) for t in texts if t and not str(t).strip().startswith("0 MHz")}   # off plans say nothing
+    return "box" if forms == {"box"} else ("mixed" if len(forms) > 1 else (forms.pop() if forms else "unknown"))
+
+
+FAN_TARGET_GAP_S = 60     # between two fan-target writes to one miner (a double click, or two tabs)
+_fan_target_last: dict[str, float] = {}
+
+
+def fan_target_problem(hw: dict[str, Any] | None) -> str:
+    """Why this miner has no fan target control ('' if it has). Only the SC Box / HS Box family: their
+    firmware ignores fan numbers and steers the fans to temp_target itself, so that target is the one fan
+    setting the app writes there. Every other model keeps the app's own fan control (curves, fan %)."""
+    hw = hw or {}
+    if not hw.get("ok"):
+        return "this miner hasn't been probed yet"
+    if hw.get("plan_format") != "box":
+        return "the fan target is only for the SC Box and HS Box (other models use the app's fan curves)"
+    if not hw.get("fan_target"):
+        return "this miner's firmware doesn't report a fan target range; press Probe now"
+    return ""
+
+
+def _fan_target_row(mid: str) -> dict[str, Any]:
+    row = next((m for m in _srv().load_registry() if _row_id(m) == mid), None)
+    if not row:
+        raise ValueError(f"unknown miner {mid}")
+    why = fan_target_problem(row.get("hardware"))
+    if why:
+        raise ValueError(why)
+    return row
+
+
+def fan_target_state(mid: str) -> dict[str, Any]:
+    """The fan target as the miner reports it now (one settings read)."""
+    _fan_target_row(mid)
+    s = _srv().get_client(mid).api("GET", "/mcb/setting")
+    ft = _fan_target_of(s if isinstance(s, dict) else {})
+    if not ft:
+        raise ValueError("the miner didn't report a fan target just now")
+    return {"ok": True, "miner_id": mid, **ft}
+
+
+def set_fan_target(body: dict[str, Any]) -> dict[str, Any]:
+    """Write the SC Box / HS Box fan target. Only temp_target changes: the settings are read fresh and put
+    back as the miner gave them (its clock, voltage, manual flag and plan stay exactly as they are; the
+    stock page's own Save would reset a manual clock to the stock plan). Range and whole degrees as the
+    firmware allows. Tested on both: the target holds and the fan loop steers to it within seconds; the SC
+    Box's fans run near full speed for about 15 minutes after a write, the HS Box's don't."""
+    mid = str(body.get("miner_id") or "")
+    _fan_target_row(mid)
+    try:
+        want = float(body.get("target"))
+    except (TypeError, ValueError):
+        raise ValueError("give the fan target in whole degrees C") from None
+    if not want.is_integer():
+        raise ValueError("the fan target is in whole degrees C")
+    left = FAN_TARGET_GAP_S - (time.time() - _fan_target_last.get(mid, 0.0))
+    if left > 0:
+        raise ValueError(f"the fan target was just changed; try again in {int(left) + 1} s")
+    client = _srv().get_client(mid)
+    s = client.api("GET", "/mcb/setting")
+    ft = _fan_target_of(s if isinstance(s, dict) else {})
+    if not ft:
+        raise ValueError("the miner didn't report a fan target just now; press Probe now")
+    if not ft["min"] <= want <= ft["max"]:
+        raise ValueError(f"this miner's fan target must be {ft['min']:g} to {ft['max']:g} °C")
+    if _settings_format(s) != "box":
+        raise ValueError("this miner's settings no longer look like an SC Box / HS Box; press Probe now")
+    before = ft["value"]
+    _fan_target_last[mid] = time.time()
+    if want != before:
+        s["temp_target"] = int(want)
+        client.api("PUT", "/mcb/setting", s)
+    after = _fan_target_of(client.api("GET", "/mcb/setting") or {}) or {}
+    held = after.get("value") == want
+    doc = _srv().load_registry_doc()
+    for m in doc.get("miners") or []:
+        if _row_id(m) == mid:
+            if isinstance(m.get("hardware"), dict) and after:
+                m["hardware"]["fan_target"] = after
+            m["fan_target_set"] = {"value": want, "from": before, "held": held, "at": int(time.time())}
+    _srv().save_registry_doc(doc)
+    if not held:
+        raise ValueError(f"the miner didn't keep {want:g} °C (it reports {after.get('value')}); nothing else was changed")
+    return {"ok": True, "miner_id": mid, "value": want, "from": before, "min": ft["min"], "max": ft["max"],
+            "changed": want != before}
 
 
 def probe_hardware(mid: str) -> dict[str, Any]:
@@ -1728,6 +1837,16 @@ def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
     if path == "/api/settings/share_scale":
         json_response(handler, 200, scale_state())
         return True
+    if path == "/api/hardware/fan_target":
+        from urllib.parse import parse_qs, urlparse
+        mid = (parse_qs(urlparse(handler.path).query).get("miner") or [""])[0]
+        try:
+            json_response(handler, 200, fan_target_state(mid))
+        except ValueError as e:
+            json_response(handler, 400, {"ok": False, "error": str(e).strip("'")})
+        except Exception as e:
+            json_response(handler, 502, {"ok": False, "error": f"{type(e).__name__}: {e}"[:200]})
+        return True
     if path in ("/api/hardware/report", "/api/hardware/report/download"):
         from urllib.parse import parse_qs, urlparse
         mid = (parse_qs(urlparse(handler.path).query).get("miner") or [""])[0]
@@ -1751,7 +1870,8 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
           "/api/quick/demo": set_demo, "/api/hardware/shares_reset": shares_addon.reset, "/api/quick/manual": take_manual,
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
           "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, **schedule_addon.ROUTES_POST,
-          "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale, **notify_addon.ROUTES_POST}.get(path)
+          "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale,
+          "/api/hardware/fan_target": set_fan_target, **notify_addon.ROUTES_POST}.get(path)
     if not fn:
         return False
     try:

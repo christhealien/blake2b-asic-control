@@ -50,14 +50,25 @@ real SC Lite run.</sub>
 | Model | Monitoring, chips, pools, restarts, best share, rejected shares, alerts | Presets, Idle, fan curves, schedule presets | Tuner |
 |---|---|---|---|
 | **SC Lite** (fw 2.2.0) | ✓ | ✓ | ✓ tested |
-| **SC-BOX / SC-BOX II** | ✓ | read only (shows what it runs) | – |
-| **HS BOX** | ✓ | read only (shows what it runs) | – |
+| **SC-BOX / SC-BOX II** | ✓ | clock and voltage read only; **fan target** (65–75 °C) | – |
+| **HS BOX** | ✓ | clock and voltage read only; **fan target** (70–80 °C) | – |
 | **SC5 Pro / SC5 Pro II** | ✓ (probe checked on a capture) | same plan format as the SC Lite, untested | allow "other models" to try |
 | Other models | probe only | – | – |
 
 The SC BOX and HS BOX write their power plan differently (`725 MHz 0.41 V 70 RPM 70 RPM`: decimal
 volts, no PV; the HS BOX keeps one plan list per algorithm), so the app shows what they run but
-leaves clock, voltage and fans alone until changing that format has been tested on real units.
+leaves clock and voltage alone until changing that format has been tested on real units.
+
+Their fans work differently too: the firmware ignores fan numbers and runs its own fan loop, which
+speeds the fans up or down to hold the control board at a **fan target** (`temp_target`, inside the
+range the firmware reports in `temp_targets`). That target is the one fan setting these models take,
+so on their Miner page the fan panel offers **Fan target** instead of curves and fan %: lower is
+cooler and louder, higher is quieter and warmer. Only `temp_target` is written; the settings are read
+fresh and sent back as the miner gave them, so a manual clock stays as it is. Tested on both by
+crProductGuy: the target holds and the fan loop steers to it within seconds. The SC Box's fans run
+near full speed for about 15 minutes after a change, the HS Box's kept their speed. The control
+appears only for these models (plan format "box" with a fan target range), and changes are at least
+a minute apart.
 
 **Have a model or firmware that isn't tested yet?** Open **Profiles**, pick the miner and press
 **Download report**. It reads the miner (one request at a time, nothing is changed, about 30 s) and
@@ -115,7 +126,7 @@ Everything that changes is in the app's data folder (on Umbrel
 
 - `miners.json`: your miners and what each was detected as (including its stock setting), their
   auto-fan settings, fan curves (`profiles`), presets (`presets`), schedules (`schedules`), power
-  calibrations (`power_cal`), mains voltage (`power`), notifications (`notify`), the time zone and how best shares are shown (`share_scale`).
+  calibrations (`power_cal`), mains voltage (`power`), notifications (`notify`), the time zone, how best shares are shown (`share_scale`) and, on an SC Box or HS Box, the last fan target the app set (`fan_target_set`).
 - `auth.json`: the login (hashed) and a log of disclaimer acknowledgements. It's first created from
   Umbrel's default login for the app. Delete it and restart the app to go back to that default.
 - `sessions.json`: who is signed in.

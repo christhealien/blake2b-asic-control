@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.15.9
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.16.0
 category: developer
-version: "1.15.9"
+version: "1.16.0"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -46,14 +46,23 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.15.9
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.15.9
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.15.9
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.15.9
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.15.9
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.15.9
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.16.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.16.0
 releaseNotes: |-
-  **What's new in 1.15.9**
+  **What's new in 1.16.0**
+
+  - **Fan target for the SC Box and HS Box.** Their firmware ignores fan numbers and runs its own fan
+    loop, holding the control board at a target temperature. The Miner page's fan panel now sets that
+    target for these two models only (SC Box 65–75 °C, HS Box 70–80 °C): lower is cooler and louder,
+    higher is quieter and warmer. Only the target is written; clock, voltage and the rest stay as the
+    miner has them. Tested on both: the target holds; the SC Box's fans run near full speed for about
+    15 minutes after a change.
+
+  **1.15.9**
 
   - **Efficiency is shown in J/TH** (joules per terahash) instead of W/TH: the same number, in the unit
     miners are usually rated in. On the Fleet card, the Miner page, the presets and the tuner's tests.

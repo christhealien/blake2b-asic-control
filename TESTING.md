@@ -57,3 +57,8 @@ then open `http://<this computer's IP>:8787`. Create the login straight away whe
 What you clicked, what you expected, what happened, a screenshot, and your miner model + firmware
 (shown on its Fleet card). The tuner is only tested on the SC Lite; other models need the
 "allow untested models" box and should be watched closely.
+
+**SC Box / HS Box:** clock and voltage stay read only. The Miner page's fan panel has **Fan target**
+instead (the firmware's own fan loop holds the control board at that temperature). After changing it,
+check the miner's own page shows the new target and that its clock is unchanged; on the SC Box expect
+the fans to run near full speed for about 15 minutes.

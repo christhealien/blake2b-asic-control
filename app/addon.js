@@ -634,6 +634,64 @@
     ren("btnDetailTc", "Apply", "Turn the miner's own temperature control on or off (on is safer)");
   }
 
+  // SC Box / HS Box fan target: their firmware ignores fan numbers and steers the fans so the control board
+  // holds temp_target, inside the range it reports. Shown only for that model family (plan format "box" with
+  // a fan target range from the probe); every other model keeps the curves and fan % above.
+  const FT = {};            // id -> {value, min, max} as last read from the miner
+  const FT_ASKED = {};      // id -> time of the last live read
+  function fanTargetBox(pan, id, hwd, note) {
+    let box = pan.querySelector(".scl-ft");
+    const ok = hwd.plan_format === "box" && hwd.fan_target && !String(id).startsWith("demo-");
+    if (!ok) { if (box) box.remove(); return; }
+    if (note) note.textContent = "Fan curves and fan % don't apply on this model: its firmware runs its own fan loop and ignores fan numbers. Set that loop's fan target here instead.";
+    const ft = FT[id] || hwd.fan_target;
+    if (!box || box.dataset.id !== id) {
+      if (box) box.remove();
+      box = document.createElement("div");
+      box.className = "scl-ft"; box.dataset.id = id;
+      box.style.cssText = "margin:.25rem 0 .9rem;padding:.65rem .8rem;border:1px solid var(--border);border-radius:8px";
+      (note || pan.querySelector("h2") || pan.firstChild).after(box);
+    }
+    const lo = Math.round(ft.min), hi = Math.round(ft.max), cur = Math.round(ft.value);
+    const opts = []; for (let t = lo; t <= hi; t++) opts.push(`<option value="${t}"${t === cur ? " selected" : ""}>${t} °C${t === cur ? " (now)" : ""}</option>`);
+    const sig = `${lo}-${hi}-${cur}`;
+    if (box.dataset.sig !== sig) {
+      box.dataset.sig = sig;
+      box.innerHTML = `<div><b>Fan target</b> <span class="muted">· the firmware's fan loop</span></div>
+        <p class="muted" style="font-size:.85rem;margin:.3rem 0 .5rem">The fans speed up or slow down to hold the control board at this temperature
+          (the chips run hotter than it). <b>Lower</b> is cooler and louder, <b>higher</b> is quieter and warmer. This model allows ${lo}–${hi} °C.
+          When the board is already under the target, the fans stay at their minimum either way.</p>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          <select class="scl-ft-sel" aria-label="Fan target">${opts.join("")}</select>
+          <button type="button" class="scl-ft-go">Set fan target</button>
+          <span class="muted scl-ft-now" style="font-size:.85rem">now ${cur} °C</span></div>
+        <p class="muted" style="font-size:.8rem;margin:.5rem 0 0">Only the fan target is written; clock, voltage and the rest stay as the miner has them.
+          ${hwd.profile === "hs-box" ? "On the HS Box the fans kept their speed through a change in testing; the new target applies within seconds."
+            : "On the SC Box the fans run near full speed for about 15 minutes after a change while its fan loop restarts."}</p>`;
+      box.querySelector(".scl-ft-go").onclick = async () => {
+        const want = Number(box.querySelector(".scl-ft-sel").value);
+        const now = Math.round((FT[id] || hwd.fan_target).value);
+        if (want === now) { toast(`The fan target is already ${now} °C`); return; }
+        if (!confirm(`Set ${nameOf(id)}'s fan target from ${now} °C to ${want} °C?\n\n${want < now ? "Cooler and louder" : "Quieter and warmer"}. Only the fan target changes.`)) return;
+        const b = box.querySelector(".scl-ft-go"); b.disabled = true; b.textContent = "Setting…";
+        try {
+          const r = await api("POST", "/api/hardware/fan_target", { miner_id: id, target: want });
+          FT[id] = { value: r.value, min: r.min, max: r.max };
+          toast(`Fan target ${r.value} °C: the miner kept it`);
+        } catch (e) { toast(e.message, true); }
+        b.disabled = false; b.textContent = "Set fan target";
+        updateDetailInfo();
+      };
+    }
+    // read the live value when the page opens (and at most once a minute), in case it was changed on the miner's own page
+    if (!FT_ASKED[id] || Date.now() - FT_ASKED[id] > 60000) {
+      FT_ASKED[id] = Date.now();
+      api("GET", `/api/hardware/fan_target?miner=${encodeURIComponent(id)}`)
+        .then(r => { const old = FT[id]; FT[id] = { value: r.value, min: r.min, max: r.max }; if (!old || old.value !== r.value || old.min !== r.min || old.max !== r.max) updateDetailInfo(); })
+        .catch(() => {});
+    }
+  }
+
   function updateDetailInfo() {
     const el = $("sclDetailInfo"), id = detailId();
     if (!el || !id) return;
@@ -647,7 +705,9 @@
       const pl2 = (x) => `${x.mhz} MHz · ${esc(x.volts)} V${x.pv ? ` · PV ${esc(x.pv)}` : ""}`;
       if (sr) bits.push(`<span title="The firmware's own level-0 plan${hwd.algo ? " for the algorithm it runs" : ""}, as the miner writes it">Stock <b>${pl2(sr)}</b>${hwd.algo ? ` <span class="muted">(${esc(hwd.algo)})</span>` : ""}</span>`);
       if (rr) bits.push(`<span title="What the miner is running: its own setting (manual) or its stock plan">Runs <b>${pl2(rr)}</b> <span class="muted">(${hwd.manual ? "manual setting" : "stock plan"})</span></span>`);
-      bits.push(`<span class="muted" title="This model writes volts as a decimal with no PV. The app reads it but doesn't change clock, voltage or fans on it yet; chip health, pools and restarts work.">Clock, voltage and fans: read only on this model</span>`);
+      const ftb = hwd.plan_format === "box" && hwd.fan_target;
+      if (ftb) bits.push(`<span title="The firmware's own fan loop speeds the fans up or down to hold the control board at this temperature. Set it in the fan panel below.">Fan target <b>${esc(FT[id] ? FT[id].value : hwd.fan_target.value)} °C</b> <span class="muted">(${esc(hwd.fan_target.min)}–${esc(hwd.fan_target.max)})</span></span>`);
+      bits.push(`<span class="muted" title="This model writes volts as a decimal with no PV. The app reads it but doesn't change clock or voltage on it yet, and its firmware runs its own fan loop${ftb ? " (the app sets that loop's target)" : ""}; chip health, pools and restarts work.">Clock and voltage: read only on this model${ftb ? "; fans follow the fan target" : "; fans too"}</span>`);
     }
     // clock / voltage and fan panels: off on a model whose plan format the app can't write yet
     const ro = !!(hwd.plan_format && hwd.plan_format !== "sc-lite");
@@ -662,12 +722,13 @@
     }
     for (const pid of ["planMhz", "detailFanAuto"]) {
       const pan = panelOf(pid); if (!pan) continue;
-      pan.querySelectorAll("input, select, button").forEach(x => { if (["detailTc", "btnDetailTc", "btnDetailRestart"].includes(x.id)) return; if (ro) { x.disabled = true; x.dataset.sclRo = "1"; } else if (x.dataset.sclRo) { x.disabled = false; delete x.dataset.sclRo; } });
+      pan.querySelectorAll("input, select, button").forEach(x => { if (["detailTc", "btnDetailTc", "btnDetailRestart"].includes(x.id) || x.closest(".scl-ft")) return; if (ro) { x.disabled = true; x.dataset.sclRo = "1"; } else if (x.dataset.sclRo) { x.disabled = false; delete x.dataset.sclRo; } });
       let n = pan.querySelector(".scl-ro-note");
       if (ro && !n) { n = document.createElement("p"); n.className = "muted scl-ro-note"; n.style.cssText = "margin:0 0 .5rem;font-size:.85rem";
         n.textContent = "Read only on this model: it writes its power plan with volts as a decimal and no PV, which the app can't change yet.";
         const h2 = pan.querySelector("h2"); if (h2) h2.after(n); else pan.prepend(n); }
       if (!ro && n) n.remove();
+      if (pid === "detailFanAuto") fanTargetBox(pan, id, hwd, n);
     }
     const m = (S().miners || []).find(x => x.id === id) || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv);
     if (h.active === "idle") bits.push(`<span title="The firmware's own Idle mode: the hash boards are off. Any other preset wakes it.">Idle: <b>not hashing</b></span>`);
