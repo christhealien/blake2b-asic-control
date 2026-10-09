@@ -22,6 +22,8 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   run them with. **Idle** puts an SC Lite in the firmware's own sleep mode. One click applies a preset.
 - **Fan curves:** drag the points of a curve (hottest board or chip → fan %); each miner runs its own,
   with a safety temperature that sends the fans to full.
+- **SC Box / HS Box fan target:** these boxes ignore fan numbers and run their own fan loop, so their Miner
+  page sets that loop's target temperature instead (lower is cooler and louder, higher quieter and warmer).
 - **Schedule:** paint presets across a week of half-hour blocks (say Low at night and Idle during
   peak power rates), with scheduled restarts on the same grid, and copy one miner's week to others.
 - **Tuner** (SC Lite): maps every clock from underclock to overclock and finds the lowest voltage each
@@ -47,28 +49,43 @@ real SC Lite run.</sub>
 
 ## Models
 
-| Model | Monitoring, chips, pools, restarts, best share, rejected shares, alerts | Presets, Idle, fan curves, schedule presets | Tuner |
-|---|---|---|---|
-| **SC Lite** (fw 2.2.0) | ✓ | ✓ | ✓ tested |
-| **SC-BOX / SC-BOX II** | ✓ | clock and voltage read only; **fan target** (65–75 °C) | – |
-| **HS BOX** | ✓ | clock and voltage read only; **fan target** (70–80 °C) | – |
-| **SC5 Pro / SC5 Pro II** | ✓ (probe checked on a capture) | same plan format as the SC Lite, untested | allow "other models" to try |
-| Other models | probe only | – | – |
+What each model can do today, and what it was tested on. Monitoring means the Fleet card and Miner
+page: hashrate and the 24-hour graph, temperatures, fans, chips, pools, restarts, best share,
+rejected shares, alerts and the widgets.
 
-The SC BOX and HS BOX write their power plan differently (`725 MHz 0.41 V 70 RPM 70 RPM`: decimal
-volts, no PV; the HS BOX keeps one plan list per algorithm), so the app shows what they run but
-leaves clock and voltage alone until changing that format has been tested on real units.
+| Model | Tested | Monitoring | Clock and voltage (presets, Idle, scheduled presets) | Fans | Tuner |
+|---|---|---|---|---|---|
+| **SC Lite** | ✓ fw 2.2.0 | ✓ | ✓ | app fan curves and fan % | ✓ |
+| **SC Box** | ✓ fw 2.2.5 | ✓ | read only | **fan target** 65–75 °C | – |
+| **HS Box** | ✓ fw 2.2.6 | ✓ | read only | **fan target** 70–80 °C | – |
+| **SC Box II** | not yet | expected ✓ | expected read only | expected fan target | – |
+| **SC5 Pro II** | probe, from a capture | ✓ | same format as the SC Lite, untested | app fan curves, untested | only with "allow untested models" |
+| **SC5 Pro** | not yet | expected ✓ | expected like the SC5 Pro II | expected like the SC5 Pro II | only with "allow untested models" |
+| **Other models** | – | probe only | – | – | – |
 
-Their fans work differently too: the firmware ignores fan numbers and runs its own fan loop, which
-speeds the fans up or down to hold the control board at a **fan target** (`temp_target`, inside the
-range the firmware reports in `temp_targets`). That target is the one fan setting these models take,
-so on their Miner page the fan panel offers **Fan target** instead of curves and fan %: lower is
-cooler and louder, higher is quieter and warmer. Only `temp_target` is written; the settings are read
-fresh and sent back as the miner gave them, so a manual clock stays as it is. Tested on both by
-crProductGuy: the target holds and the fan loop steers to it within seconds. The SC Box's fans run
-near full speed for about 15 minutes after a change, the HS Box's kept their speed. The control
-appears only for these models (plan format "box" with a fan target range), and changes are at least
-a minute apart.
+"Expected" means the model is the same family as a tested one, but nobody has run it yet: the probe
+decides from what the miner reports, and a **Download report** (below) is the way to confirm it.
+
+**SC Lite.** Everything is tested on it: presets (High, Middle, Low, Lowest power and your own), the
+firmware's Idle mode, schedules, auto fan with curves, and the tuner.
+
+**SC Box and HS Box.** Monitoring is complete. Clock and voltage are read only: these models write
+their power plan differently (`725 MHz 0.41 V 70 RPM 70 RPM`: decimal volts, no PV; the HS Box keeps
+one plan list per algorithm), so there are no presets, Idle, scheduled presets or tuner on them
+(scheduled restarts work). Their
+fans work differently too: the firmware ignores fan numbers and runs its own fan loop, which holds
+the control board at a **fan target** (`temp_target`, inside the range it reports in `temp_targets`).
+That target is the one fan setting these models take, so their Miner page sets it instead of curves
+and fan %: lower is cooler and louder, higher is quieter and warmer. Only `temp_target` is written;
+the settings are read fresh and sent back as the miner gave them, so a manual clock stays as it is.
+Tested by crProductGuy on both: the target holds and the fan loop steers to it within seconds. The SC
+Box's fans run near full speed for about 15 minutes after a change; the HS Box's kept their speed. The
+control appears only on these models (plan format "box" with a fan target range), and changes are at
+least a minute apart.
+
+**SC5 Pro II.** Its power plan has the same format as the SC Lite's, so presets, auto fan and the
+tuner can work, but they haven't been run on one: the tuner only starts with "allow untested
+models", and should be watched closely.
 
 **Have a model or firmware that isn't tested yet?** Open **Profiles**, pick the miner and press
 **Download report**. It reads the miner (one request at a time, nothing is changed, about 30 s) and
