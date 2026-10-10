@@ -31,7 +31,8 @@ HERE = Path(__file__).resolve().parent
 PYDIR = Path(os.environ.get("SCLITE_TUNER_DIR", str(HERE.parent / "python")))   # where the scripts are
 DATA = Path(os.environ.get("SCLITE_TUNER_DATA") or PYDIR)                        # where results are kept
 SCRIPT = PYDIR / "asic_tuner.py"
-SCRIPT_TAG = b"asic_tuner"     # how a running tuner is recognised in /proc/<pid>/cmdline
+SCRIPT_BOX = PYDIR / "asic_tuner_box.py"   # the SC Box / HS Box clock tuner (since 1.17)
+SCRIPT_TAG = b"asic_tuner"     # how a running tuner is recognised in /proc/<pid>/cmdline (both scripts)
 PREFIX = "asic_tuner"             # data file names: asic_tuner.log, asic_tuner_results.csv, ...
 OLD_PREFIX = "sclite_autotune"    # names used before 1.8 (renamed on start)
 
@@ -65,8 +66,8 @@ _PLAN_FORMS = (
 )
 FORMAT_NOTE = {
     "box": ("this model writes its power plan with volts as a decimal and no PV (like \"725 MHz 0.41 V 70 RPM 70 RPM\", "
-            "as the SC BOX and HS BOX do). The app can read it but can't change clock or voltage in that format yet, "
-            "so the tuner, presets and clock settings are off for this miner. Probing again won't change that"),
+            "as the SC BOX and HS BOX do). The app sets its clock only (clock presets, the clock on its Miner page and the "
+            "box tuner) and keeps its voltage as the miner has it; the SC Lite clock / voltage / PV settings are off for it"),
     "float-pv": ("this model writes its power plan with decimal volts and a PV term. The app can't change clock or "
                  "voltage in that format yet. Probing again won't change that"),
     "unknown": ("this miner's power plan is in a format the app doesn't recognise, so clock and voltage can't be "
@@ -542,6 +543,11 @@ def _start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("this miner hasn't been probed yet, so the tuner doesn't know what it is. "
                            "Press Probe (on this page or on Profiles) and start again. New miners are "
                            "probed automatically within a minute or so of being added.")
+    if hw.get("plan_format") == "box":
+        for other, r in runs().items():
+            if r["running"] and other != mid and (r["info"].get("ip") or "") == ip:
+                raise RuntimeError(f"{ip} is already being tuned (as {other})")
+        return _start_box(row, body, mid, ip, pw, hw)
     if hw.get("profile") != "sc-lite" and not body.get("any_model"):
         raise RuntimeError(f"this miner was detected as {hw.get('name') or hw.get('model') or hw.get('profile') or 'an unknown model'}. "
                            "The tuner is only tested on the SC Lite; tick 'Allow miner models other than the "
@@ -718,8 +724,102 @@ def _start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
     return _spawn(row, mid, ip, pw, args, opts, extra)
 
 
+BOX_OPTS: dict[str, tuple[str, type, float, float, float]] = {
+    "baseline_min": ("--baseline-min", float, 15, 180, 60),
+    "hold_min":     ("--hold-min",     float, 10, 180, 30),
+    "confirm_min":  ("--confirm-min",  float, 10, 240, 60),
+    "preset_min":   ("--preset-min",   float, 10, 120, 30),
+    "sigma":        ("--sigma",        float, 1,   5,   2.5),
+    "abort_c":      ("--abort-c",      float, 60,  92,  88),
+}
+
+
+def box_tuner_limits(hw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Clock options for the box tuner: from the stock clock (SC Box 725, HS Box 850) and the clock it runs."""
+    hw = hw or {}
+    import box_plan
+    if hw.get("plan_format") != "box" or not (hw.get("stock_read") or {}).get("mhz"):
+        return None
+    if not box_plan.STOCK_RANGE[0] <= int(hw["stock_read"]["mhz"]) <= box_plan.STOCK_RANGE[1]:
+        return None
+    lim = box_plan.limits(int(hw["stock_read"]["mhz"]))
+    run = (hw.get("running_read") or {}).get("mhz")
+    return {**lim, "grid": box_plan.GRID, "running": run, "volts": (hw.get("running_read") or {}).get("volts"),
+            # two steps above what it runs (capped at stock): both test boxes made errors one step up already
+            "defaults": {"start_mhz": run, "max_mhz": min(lim["hi"], max(lim["lo"], (int(run or lim["hi"]) // box_plan.GRID) * box_plan.GRID + 2 * box_plan.GRID)), **{k: v[4] for k, v in BOX_OPTS.items()}},
+            "options": {k: [v[2], v[3]] for k, v in BOX_OPTS.items()}}
+
+
+def _start_box(row: dict[str, Any], body: dict[str, Any], mid: str, ip: str, pw: str, hw: dict[str, Any]) -> dict[str, Any]:
+    """An SC Box / HS Box: asic_tuner_box.py (clock only). Search (baseline, climb, confirm, presets) or presets only."""
+    if not SCRIPT_BOX.is_file():
+        raise RuntimeError(f"{SCRIPT_BOX} not found; put asic_tuner_box.py in the python folder")
+    bl = box_tuner_limits(hw)
+    if not bl:
+        raise RuntimeError("this box's stock plan wasn't read at the last probe; press Probe and start again")
+    why = sign_in_problem(ip, pw)
+    if why:
+        raise RuntimeError(f"the miner at {ip} refused a fresh sign-in, so the tuner couldn't start: {why}")
+    mode = "presets" if body.get("mode") == "presets" else "search"
+    opts: dict[str, Any] = {"mode": mode, "box": True, "fans": "leave", "fan_hold_c": 0}
+    args: list[str] = []
+    for name, spec in BOX_OPTS.items():
+        opts[name] = _num(body, name, spec)
+        args += [spec[0], f"{opts[name]:g}"]
+    import box_plan
+    kind = str(body.get("baseline") or "current")
+    if kind not in ("current", "custom"):
+        raise RuntimeError("baseline must be current or custom")
+    live = None
+    try:      # what it runs right now (the stored probe can be out of date after a run or a change on the miner)
+        from miner_client import MinerClient
+        s = MinerClient(ip=ip, password=pw).api("GET", "/mcb/setting")
+        live = box_plan.parse(box_plan.running_text(s)) if isinstance(s, dict) else None
+        fresh = box_plan.parse(box_plan.stock_text(s)) if isinstance(s, dict) else None
+    except Exception:
+        fresh = None
+    if not live or not fresh:
+        raise RuntimeError("couldn't read what this box runs now (or its stock plan); try again in a minute")
+    if fresh["mhz"] != bl["stock"]:
+        raise RuntimeError(f"the box's stock plan now reads {fresh['mhz']} MHz, not {bl['stock']} as at the last probe "
+                           "(another algorithm?): press Probe and start again")
+    try:
+        start = int(live["mhz"]) if kind == "current" else int(body.get("start_mhz"))
+    except (TypeError, ValueError):
+        raise RuntimeError("the baseline clock must be a whole number of MHz")
+    if kind == "current" and start % box_plan.GRID:
+        raise RuntimeError(f"it runs {start} MHz, off the {box_plan.GRID} MHz grid: pick a baseline clock yourself")
+    try:
+        box_plan.check_clock(start, bl["stock"])     # the baseline is never above stock: it isn't judged
+    except ValueError as e:
+        raise RuntimeError(f"baseline: {e}") from None
+    opts["baseline"], opts["start_mhz"] = kind, start
+    args += ["--start-mhz", str(start), "--stock-mhz", str(bl["stock"])]
+    if mode == "search":
+        try:
+            top = int(body.get("max_mhz") or bl["hi"])
+            box_plan.check_clock(top, bl["stock"], tuning=True)
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f"highest clock: {e}") from None
+        if top < start:
+            raise RuntimeError("the highest clock can't be below the baseline")
+        opts["max_mhz"] = top
+        args += ["--max-mhz", str(top)]
+        opts["confirm"] = bool(body.get("confirm", True))
+        if not opts["confirm"]:
+            args.append("--no-confirm")
+        opts["presets"] = bool(body.get("presets", True))
+        if not opts["presets"]:
+            args.append("--no-presets")
+    else:
+        args.append("--presets-only")
+        opts["presets"] = True
+    opts["before"] = live
+    return _spawn(row, mid, ip, pw, args, opts, script=SCRIPT_BOX)
+
+
 def _spawn(row: dict[str, Any], mid: str, ip: str, pw: str, args: list[str], opts: dict[str, Any],
-           extra_env: dict[str, str] | None = None) -> dict[str, Any]:
+           extra_env: dict[str, str] | None = None, script: Path | None = None) -> dict[str, Any]:
     f = Files(mid)
     f.dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
@@ -729,7 +829,7 @@ def _spawn(row: dict[str, Any], mid: str, ip: str, pw: str, args: list[str], opt
     log.write(f"\n===== started from dashboard {time.strftime('%Y-%m-%d %H:%M:%S')} "
               f"miner {mid} ({ip}) =====\n")
     proc = subprocess.Popen(
-        [sys.executable, "-u", str(SCRIPT), *args],
+        [sys.executable, "-u", str(script or SCRIPT), *args],
         cwd=str(PYDIR), env=env, stdout=log, stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL, start_new_session=True,
     )
@@ -857,7 +957,14 @@ def status(mid: Any = None) -> dict[str, Any]:
     # once a run has ended, the tuner's own BEST line is the answer
     if not info and finished and finished.startswith("BEST:"):
         m = re.match(r"BEST: (\d+) MHz at (\d+) mV \(PV (\d+)\)", finished)
-        if m:
+        mb = re.match(r"BEST: (\d+) MHz at ([\d.]+) V \(clock only\)", finished)
+        if mb:      # an SC Box / HS Box run: the clock it ended on (High)
+            mhz = mb.group(1)
+            same = [r for r in results if r["mhz"] == mhz and r.get("avg_ths")]
+            best = {"mhz": mhz, "mv": str(round(float(mb.group(2)) * 1000)), "pv": "",
+                    "avg_ths": same[-1]["avg_ths"] if same else ""}
+            confirmed = [r for r in confirmed if r["mhz"] == mhz]
+        elif m:
             mhz, mv, pv = m.groups()
             same = [r for r in results if r["mhz"] == mhz and r["mv"] == mv and r.get("avg_ths")]
             best = {"mhz": mhz, "mv": mv, "pv": pv,

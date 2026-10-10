@@ -151,6 +151,7 @@
         curve (tick <i>Build presets</i> on the Tuner page). <b>Apply</b> puts the clock on the miner and switches its auto fan
         to that curve.</p>
       <div id="tuningNote" class="note warn hidden"></div>
+      <div id="boxNote" class="note hidden"></div>
       <div class="pcards" id="pcards"></div>
 
       <div id="presetForm" class="hidden" style="margin-top:1rem;border-top:1px solid var(--line);padding-top:.9rem">
@@ -655,11 +656,27 @@ function renderPresets() {
   $("tuningNote").innerHTML = m.tuning ? `A tuning run is going on <b>${esc(m.name)}</b>${m.tuner_fans ? " and it is holding the fans" : ""}.
      Presets can be applied when it ends; new ones it builds appear here then. <a href="/tuner.html?miner=${encodeURIComponent(m.id)}">Open the tuner</a>` : "";
   const ps = m.presets || {};
+  const bx = m.box;      // an SC Box / HS Box: clock-only presets
+  $("boxNote").classList.toggle("hidden", !bx);
+  if (bx) {
+    $("boxNote").innerHTML = `<b>${esc(m.name)}</b> is an SC Box / HS Box: its presets set the <b>clock only</b> (${esc(bx.lo)}–${esc(bx.hi)} MHz,
+      stock ${esc(bx.stock)}). The voltage stays as the miner has it (a step lower made no measurable difference in power in testing) and the
+      fans follow its fan target (Miner page). <button type="button" id="btnBoxDefaults" ${m.tuning ? "disabled" : ""}>Make four from its clock</button>
+      <span class="muted" style="font-size:.85rem">High at the clock it runs now${bx.running > bx.hi ? ` (capped at stock ${esc(bx.hi)})` : ""}, then 25, 50 and 75 MHz lower, not tested.
+      The <a href="/tuner.html?miner=${encodeURIComponent(m.id)}">Tuner</a> finds the fastest clean clock and tests all four.</span>`;
+    $("btnBoxDefaults").onclick = async () => {
+      const have = SLOTS.some(sl => ps[sl[0]] && ps[sl[0]].source !== "tuner");
+      if (!confirm(`Make High / Middle / Low / Lowest power for ${m.name} from the clock it runs now?` + (have ? "\n\nHand-set presets already in those places are replaced; tested tuner presets are kept." : ""))) return;
+      try { const r = await api("POST", "/api/presets/box_defaults", { miner_id: m.id, replace: true });
+            toast(r.made.length ? `Made ${r.made.length} preset${r.made.length > 1 ? "s" : ""} from ${r.top} MHz` : "Nothing to make: those places hold tested presets"); await load(); }
+      catch (e) { toast(e.message, true); }
+    };
+  }
   const keys = [...SLOTS.map(s => s[0]), ...Object.keys(ps).filter(k => !SLOTS.some(s => s[0] === k) && k !== "idle"), ...(ps.idle ? ["idle"] : [])];
   box.innerHTML = keys.map(k => {
     const p = ps[k]; const slot = SLOTS.find(s => s[0] === k);
     if (!p) return `<div class="pcard empty"><h3>${slot[1]}</h3>
-        <div class="meta">Not built yet. Run a search on the Tuner page with <i>Build presets</i> ticked.</div>
+        <div class="meta">${bx ? "Not set yet. <i>Make four from its clock</i> above, or let the Tuner find and test them." : "Not built yet. Run a search on the Tuner page with <i>Build presets</i> ticked."}</div>
         <div class="acts"><a href="/tuner.html?miner=${encodeURIComponent(m.id)}"><button type="button">Tuner</button></a></div></div>`;
     const active = m.active_preset === k;
     if (p.idle) return `<div class="pcard ${active ? "active" : ""}">
@@ -676,9 +693,9 @@ function renderPresets() {
     return `<div class="pcard ${active ? "active" : ""} ${bad ? "failed" : ""}">
       <h3>${esc(p.label || k)} ${active ? '<span class="pill ok">on the miner</span>' : ""}</h3>
       <div class="clock">${p.mhz} MHz</div>
-      <div class="sub">${p.mv} mV · PV ${p.pv}${Math.floor(p.mhz / 12.5) * 12.5 !== p.mhz ? ` · runs ${Math.floor(p.mhz / 12.5) * 12.5} MHz` : ""}</div>
+      <div class="sub">${p.box ? `clock only${bx && bx.volts ? ` · ${esc(bx.volts)} V` : ""}${bx && p.mhz === bx.stock ? " · stock clock" : ""}` : `${p.mv} mV · PV ${p.pv}${Math.floor(p.mhz / 12.5) * 12.5 !== p.mhz ? ` · runs ${Math.floor(p.mhz / 12.5) * 12.5} MHz` : ""}`}</div>
       ${p.power ? `<div class="meta" title="Estimate: chips follow clock × PV² (PV is the real board voltage). Calibrate it on the Miner page.">≈ ${p.power.w} W · ${p.power.amps} A${p.power.w_per_th ? ` · ${p.power.w_per_th} J/TH` : ""}</div>` : ""}
-      <div class="meta">${!p.fan_profile ? "Fans: left as they are" : S.profiles[p.fan_profile] && S.profiles[p.fan_profile].tuned
+      <div class="meta">${p.box ? "Fans: follow its fan target" : !p.fan_profile ? "Fans: left as they are" : S.profiles[p.fan_profile] && S.profiles[p.fan_profile].tuned
         ? `Fans: its own tuned curve${p.target_c != null ? ` (holds about ${p.target_c} °C)` : ""}` : "Fans: " + esc(profLabel(p.fan_profile))}</div>
       ${p.fan_profile ? spark(p.fan_profile) : ""}
       <div class="meta">${tested}</div>
@@ -693,9 +710,9 @@ function renderPresets() {
 }
 async function applyPreset(k) {
   const m = miner(); const p = m.presets[k];
-  const msg = p.idle ? `Put ${m.name} in Idle?\n\nIt stops hashing until you pick another preset (or its schedule does).` : `Put ${p.label} on ${m.name}?\n\n${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}` +
+  const msg = p.idle ? `Put ${m.name} in Idle?\n\nIt stops hashing until you pick another preset (or its schedule does).` : `Put ${p.label} on ${m.name}?\n\n` + (p.box ? `${p.mhz} MHz (clock only: voltage and fans stay as they are)` : `${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}` +
     (p.fan_profile ? `\nFans: ${profLabel(p.fan_profile)} (auto fan on)` : "\nFans: left as they are") +
-    (p.source !== "tuner" ? "\n\nThis preset was set by hand and hasn't been tested." : "");
+    "") + (p.source !== "tuner" ? "\n\nThis preset was set by hand and hasn't been tested." : "");
   if (!confirm(msg)) return;
   try { await api("POST", "/api/presets/apply", { miner_id: m.id, key: k }); toast(`${p.label} is on ${m.name}`); await load(); }
   catch (e) { toast(e.message, true); }
@@ -713,8 +730,18 @@ function editPreset(k) {
   const stock = (m.hardware && m.hardware.stock) || { mhz: 625, mv: 9100, pv: 9400 };   // from the probe
   pfGap = p ? p.pv - p.mv : (any ? any.pv - any.mv : stock.pv - stock.mv);
   $("pfTitle").textContent = p ? `Edit ${p.label}` : `New preset for ${m.name}`;
+  const bx = m.box;      // SC Box / HS Box: the clock only
+  ["pfMv", "pfPv", "pfFan"].forEach(i => $(i).closest("label").classList.toggle("hidden", !!bx));
+  $("pfPvAuto").closest("label").classList.toggle("hidden", !!bx);
+  $("pfMhz").step = bx ? bx.grid : 25;
+  if (bx) { $("pfMhz").min = bx.lo; $("pfMhz").max = bx.hi; } else { $("pfMhz").removeAttribute("min"); $("pfMhz").removeAttribute("max"); }
+  $("pfWarn").innerHTML = bx ? `On this model a preset is a <b>clock only</b>, ${esc(bx.lo)}–${esc(bx.hi)} MHz in ${esc(bx.grid)} MHz steps (never above
+    stock: both boxes made errors 25 MHz above what they ran). Hand-set clocks are <b>not tested</b>; the Tuner tests them.`
+    : `Clocks you type in are <b>not tested</b>. A clock or voltage the chips can't run
+          makes errors and can overheat the boards. Use the tuner to find safe settings; hand-set presets are marked
+          <i>not tested</i>.`;
   $("pfLabel").value = p ? p.label : "";
-  $("pfMhz").value = p ? p.mhz : (any ? any.mhz : stock.mhz);
+  $("pfMhz").value = p ? p.mhz : bx ? Math.min(bx.hi, Math.floor((bx.running || bx.hi) / bx.grid) * bx.grid) : (any ? any.mhz : stock.mhz);
   $("pfMv").value = p ? p.mv : (any ? any.mv : stock.mv);
   $("pfPv").value = p ? p.pv : Number($("pfMv").value) + pfGap;
   $("pfFan").innerHTML = fanOptions(p ? p.fan_profile : "");
@@ -732,8 +759,9 @@ $("btnNewPreset").onclick = () => editPreset("");
 $("btnPfCancel").onclick = () => { $("presetForm").classList.add("hidden"); pfKey = null; };
 $("btnPfSave").onclick = async () => {
   const m = miner();
-  const body = { miner_id: m.id, key: pfKey || undefined, label: $("pfLabel").value.trim(), mhz: Number($("pfMhz").value),
-                 mv: Number($("pfMv").value), pv: Number($("pfPv").value), fan_profile: $("pfFan").value || null };
+  const body = m.box ? { miner_id: m.id, key: pfKey || undefined, label: $("pfLabel").value.trim(), mhz: Number($("pfMhz").value) }
+    : { miner_id: m.id, key: pfKey || undefined, label: $("pfLabel").value.trim(), mhz: Number($("pfMhz").value),
+        mv: Number($("pfMv").value), pv: Number($("pfPv").value), fan_profile: $("pfFan").value || null };
   try {
     await api("POST", "/api/presets/save", body);
     toast("Preset saved"); $("presetForm").classList.add("hidden"); pfKey = null; await load();
@@ -880,7 +908,7 @@ function renderHeader() {
   $("stHw").textContent = !m ? "—" : m.probing ? "probing…" : m.hardware_line || "not probed yet";
   $("stHw").style.color = hw && hw.ok ? "var(--text)" : "var(--warn)";
   $("btnProbe").textContent = hw && hw.ok ? "Probe again" : "Probe now";
-  const untested = hw && hw.ok && !hw.tuner_tested;
+  const untested = hw && hw.ok && !hw.tuner_tested && !m.box;
   $("repNote").classList.toggle("hidden", !untested);
   if (untested) $("repNote").innerHTML = "This model hasn't been tested with the tuner yet, so presets and tuning stay off for it. "
     + "<b>Download report</b> reads it (nothing is changed, about 30 s) and saves a zip with nothing private in it (no pool, wallet, WiFi or password; MAC and IP addresses taken out): "

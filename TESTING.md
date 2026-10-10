@@ -55,10 +55,18 @@ then open `http://<this computer's IP>:8787`. Create the login straight away whe
 ## What to report
 
 What you clicked, what you expected, what happened, a screenshot, and your miner model + firmware
-(shown on its Fleet card). The tuner is only tested on the SC Lite; other models need the
+(shown on its Fleet card). The SC Lite tuner is tested on the SC Lite; other models of that form need the
 "allow untested models" box and should be watched closely.
 
-**SC Box / HS Box:** clock and voltage stay read only. The Miner page's fan panel has **Fan target**
-instead (the firmware's own fan loop holds the control board at that temperature). After changing it,
-check the miner's own page shows the new target and that its clock is unchanged; on the SC Box expect
-the fans to run near full speed for about 15 minutes.
+**SC Box / HS Box:** the app sets the clock only (voltage and fans stay as the miner has them).
+- **Clock** (Miner page, clock panel): pick a clock and press Set clock. Check port 4028 or the miner's own
+  page reports the new clock, and that the voltage and the fan target didn't change.
+- **Presets** (Profiles): *Make four from its clock*, then Apply one; the Fleet card shows it as on the miner.
+- **Tuner** (Tuner page, the SC Box / HS Box form): the first runs on these models are new, so watch the
+  first steps. A plug-in power meter is useful: note the watts at each preset. Stop it once mid-run and check
+  the miner goes back to exactly what it ran before (on an HS Box on its stock plan: 850 MHz on port 4028, and
+  "manual" off on its own page).
+- **Fan target** (Miner page, fan panel): the firmware's own fan loop holds the control board at that
+  temperature. After changing it, check the miner's own page shows the new target and that its clock is
+  unchanged.
+- On the SC Box expect the fans to run near full speed for about 15 minutes after any settings change.

@@ -20,6 +20,8 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   **rejected shares** sorted into stale (pool timing, harmless) and not stale (worth a look).
 - **Presets:** High, Middle, Low and Lowest power per miner: a clock, voltage, PV and the fan curve to
   run them with. **Idle** puts an SC Lite in the firmware's own sleep mode. One click applies a preset.
+  On the **SC Box and HS Box** a preset is a clock only (their voltage stays as the miner has it), and
+  their Miner page has a clock control.
 - **Fan curves:** drag the points of a curve (hottest board or chip → fan %); each miner runs its own,
   with a safety temperature that sends the fans to full.
 - **SC Box / HS Box fan target:** these boxes ignore fan numbers and run their own fan loop, so their Miner
@@ -31,6 +33,9 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   temperature you choose. It confirms the winner and builds and tests the four presets, each with its
   own fan curve. **Rebuild the presets** tests them again from the last search's curve (for example at
   another temperature) in a few hours instead of a day. Several miners can tune at once.
+  The **SC Box and HS Box** get a clock tuner: it learns every chip's normal error rate, steps the clock
+  up 25 MHz at a time until a step isn't clean, confirms the fastest clean clock, then builds and tests
+  the four clock presets.
 - **Notifications** on Telegram or Discord: a miner offline, too hot, low hashrate, restarted on its
   own, a scheduled change that failed, a tuning run finished, a new best-share record, a weak chip, a
   share rejected for a reason other than stale. Each kind and each miner on or off.
@@ -53,12 +58,12 @@ What each model can do today, and what it was tested on. Monitoring means the Fl
 page: hashrate and the 24-hour graph, temperatures, fans, chips, pools, restarts, best share,
 rejected shares, alerts and the widgets.
 
-| Model | Tested | Monitoring | Clock and voltage (presets, Idle, scheduled presets) | Fans | Tuner |
+| Model | Tested | Monitoring | Clock and voltage (presets, scheduled presets) | Fans | Tuner |
 |---|---|---|---|---|---|
-| **SC Lite** | ✓ fw 2.2.0 | ✓ | ✓ | app fan curves and fan % | ✓ |
-| **SC Box** | ✓ fw 2.2.5 | ✓ | read only | **fan target** 65–75 °C | – |
-| **HS Box** | ✓ fw 2.2.6 | ✓ | read only | **fan target** 70–80 °C | – |
-| **SC Box II** | not yet | expected ✓ | expected read only | expected fan target | – |
+| **SC Lite** | ✓ fw 2.2.0 | ✓ | ✓ clock, voltage and PV, plus Idle | app fan curves and fan % | ✓ clock and voltage |
+| **SC Box** | ✓ fw 2.2.5 | ✓ | **clock only** (voltage kept as the miner has it) | **fan target** 65–75 °C | **clock tuner** (new in 1.17) |
+| **HS Box** | ✓ fw 2.2.6 | ✓ | **clock only** (voltage kept as the miner has it) | **fan target** 70–80 °C | **clock tuner** (new in 1.17) |
+| **SC Box II** | not yet | expected ✓ | expected clock only | expected fan target | expected clock tuner |
 | **SC5 Pro II** | probe, from a capture | ✓ | same format as the SC Lite, untested | app fan curves, untested | only with "allow untested models" |
 | **SC5 Pro** | not yet | expected ✓ | expected like the SC5 Pro II | expected like the SC5 Pro II | only with "allow untested models" |
 | **Other models** | – | probe only | – | – | – |
@@ -69,19 +74,40 @@ decides from what the miner reports, and a **Download report** (below) is the wa
 **SC Lite.** Everything is tested on it: presets (High, Middle, Low, Lowest power and your own), the
 firmware's Idle mode, schedules, auto fan with curves, and the tuner.
 
-**SC Box and HS Box.** Monitoring is complete. Clock and voltage are read only: these models write
-their power plan differently (`725 MHz 0.41 V 70 RPM 70 RPM`: decimal volts, no PV; the HS Box keeps
-one plan list per algorithm), so there are no presets, Idle, scheduled presets or tuner on them
-(scheduled restarts work). Their
-fans work differently too: the firmware ignores fan numbers and runs its own fan loop, which holds
-the control board at a **fan target** (`temp_target`, inside the range it reports in `temp_targets`).
-That target is the one fan setting these models take, so their Miner page sets it instead of curves
-and fan %: lower is cooler and louder, higher is quieter and warmer. Only `temp_target` is written;
-the settings are read fresh and sent back as the miner gave them, so a manual clock stays as it is.
-Tested by crProductGuy on both: the target holds and the fan loop steers to it within seconds. The SC
-Box's fans run near full speed for about 15 minutes after a change; the HS Box's kept their speed. The
-control appears only on these models (plan format "box" with a fan target range), and changes are at
-least a minute apart.
+**SC Box and HS Box.** Monitoring is complete. These models write their power plan differently
+(`550 MHz 0.44 V 90 RPM 90 RPM`: decimal volts, no PV; the HS Box keeps one plan list per algorithm),
+and since 1.17 the app sets their **clock**:
+
+- **Clock only.** crProductGuy's clock and voltage test on both boxes, with a plug-in power meter,
+  showed that a 0.01 V lower voltage made no measurable difference in wall power, while every 25 MHz
+  moved power and hashrate together at the same J/TH (about 7 W per 25 MHz on the SC Box and 4–5 W on
+  the HS Box; around 250–260 J/TH on the SC Box and 280–290 on the HS Box). So the app changes the clock
+  and leaves the voltage and fan fields exactly as the miner has them. A clock is written as the
+  miner's manual plan and applies at once, without a restart.
+- **Never above stock** (SC Box 725 MHz, HS Box 850 MHz), on the 25 MHz grid, down to half of stock.
+  Both test boxes made errors 25 MHz above what they ran (the SC Box at 575 MHz, the HS Box at
+  875 MHz), so the clock control, the presets, schedules and the clock a tuning run ends on stay at
+  stock or below. Only a tuning step may try stock + 25 MHz, to see if there's headroom.
+- **Presets** are clocks: *Make four from its clock* (Profiles) makes High at the clock it runs now and
+  Middle, Low and Lowest power 25, 50 and 75 MHz lower, not tested; the tuner tests them. There's no
+  Idle preset on these boxes.
+- **Clock control** on the Miner page, locked while a preset or schedule is in charge (like the SC
+  Lite's) and while tuning.
+- **Clock tuner:** a baseline at the clock it runs now (every chip's normal error rate), then 25 MHz up
+  at a time until a step isn't clean, a confirm of the fastest clean clock, then the four presets,
+  each tested. It ends on High when High passed; otherwise, or when stopped, it puts back exactly what
+  the miner ran before. The first runs on these models are new: watch them.
+- **Going back to a stock plan** writes the stock clock first: on the HS Box, turning the manual
+  setting off alone kept the last clock written.
+
+Their fans work differently too: the firmware ignores fan numbers and runs its own fan loop, which
+holds the control board at a **fan target** (`temp_target`, inside the range it reports in
+`temp_targets`). That target is the one fan setting these models take, so their Miner page sets it
+instead of curves and fan %: lower is cooler and louder, higher is quieter and warmer. Only
+`temp_target` is written; the settings are read fresh and sent back as the miner gave them. Tested by
+crProductGuy on both: the target holds and the fan loop steers to it within seconds. The SC Box's fans
+run near full speed for about 15 minutes after any settings change (a fan target or a clock); the HS
+Box's kept their speed. Changes are at least a minute apart.
 
 **SC5 Pro II.** Its power plan has the same format as the SC Lite's, so presets, auto fan and the
 tuner can work, but they haven't been run on one: the tuner only starts with "allow untested
@@ -176,6 +202,8 @@ Umbrel only reads `*/umbrel-app.yml` in a store repo, so `app/` is ignored by it
 | `entrypoint.sh` | Starts the dashboard and widgets. On shutdown it stops every tuning run so each one restores its best setting |
 | `install_addons.py` | Wires every page, route, the login and the Fleet changes into the dashboard (runs during the build) |
 | `asic_tuner.py` | The per-chip tuner, including the fan hold, presets and rebuilds |
+| `asic_tuner_box.py` | The SC Box / HS Box clock tuner (it reuses the per-chip judging of `asic_tuner.py`) |
+| `box_plan.py` | Writing and putting back an SC Box / HS Box clock, shared by the dashboard and the box tuner |
 | `tuner_addon.py` / `tuner.html` | The Tuner API (one run and folder per miner) and the Tuner page |
 | `fan_addon.py` / `profiles.html` | Fan curves, presets and Idle, probing, the chip list, locks, restart, time zone and demo miners, plus the Profiles page |
 | `schedule_addon.py` / `schedule.html` | Per-miner schedules and the engine that applies them, plus the Schedule page |

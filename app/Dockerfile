@@ -25,12 +25,12 @@ RUN git clone "$UPSTREAM_REPO" /src \
  && apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
 COPY tuner_addon.py tuner.html fan_addon.py profiles.html schedule_addon.py shares_addon.py health_addon.py miner_safety.py notify_addon.py rejects_addon.py hashrate_addon.py report_addon.py schedule.html addon.js \
-     auth_addon.py login.html theme.css theme.js widget_server.py install_addons.py /app/webui/
-COPY asic_tuner.py /app/python/
+     auth_addon.py login.html theme.css theme.js widget_server.py install_addons.py box_plan.py /app/webui/
+COPY asic_tuner.py asic_tuner_box.py box_plan.py /app/python/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN cd /app/webui \
  && python install_addons.py \
- && python -m py_compile server.py tuner_addon.py fan_addon.py schedule_addon.py shares_addon.py health_addon.py miner_safety.py notify_addon.py rejects_addon.py hashrate_addon.py auth_addon.py widget_server.py /app/python/asic_tuner.py \
+ && python -m py_compile server.py tuner_addon.py fan_addon.py schedule_addon.py shares_addon.py health_addon.py miner_safety.py notify_addon.py rejects_addon.py hashrate_addon.py auth_addon.py widget_server.py box_plan.py /app/python/asic_tuner.py /app/python/asic_tuner_box.py \
  && chmod 755 /app/entrypoint.sh
 
 # Everything that changes lives in /data (the app's data folder on the Umbrel)
@@ -39,10 +39,10 @@ ENV SCLITE_WEBUI_HOST=0.0.0.0 \
     SCLITE_WEBUI_MINERS=/data/miners.json \
     SCLITE_TUNER_DATA=/data/tuner \
     PYTHONUNBUFFERED=1 \
-    B2AC_VERSION=1.16.2
+    B2AC_VERSION=1.17.0
 
 LABEL org.opencontainers.image.title="Blake2b ASIC Control" \
-      org.opencontainers.image.version="1.16.2" \
+      org.opencontainers.image.version="1.17.0" \
       org.opencontainers.image.source="https://github.com/christhealien/blake2b-asic-control" \
       org.opencontainers.image.licenses="MIT"
 

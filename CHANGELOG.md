@@ -8,6 +8,52 @@ and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links
 add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
 (see the README).
 
+## 1.17.0 (2026-10-10)
+
+**Clock control, clock presets and a clock tuner for the SC Box and HS Box.** Built on crProductGuy's clock and
+voltage tests on both boxes (fw 2.2.5 / 2.2.6, with a plug-in power meter):
+- a manual plan applies live, without a restart;
+- 0.01 V less made no measurable difference in wall power on either box;
+- every 25 MHz moved power and hashrate together at the same J/TH: about 7 W per 25 MHz on the SC Box, 4–5 W on the HS Box;
+- both made errors one step above what they ran (SC Box 575 MHz, chip 8; HS Box 875 MHz, chips 6, 11 and 16), while lower clocks were clean.
+
+So on these models the app changes the **clock only** and keeps the voltage and fan fields exactly as the miner has them.
+
+- **`box_plan.py`** (new, shared by the dashboard and the tuner) writes a box clock and puts a box back.
+  - A clock is written as a manual plan with the running plan's voltage and fan fields; `select` and every other setting go back as read, and it's checked by reading it back.
+  - The range is half of stock up to stock (SC Box 350–725, HS Box 425–850 MHz), on the 25 MHz grid. A box reporting a stock clock outside 300–1000 MHz isn't changed.
+  - Each write reads the stock plan again. If it no longer matches the probe (an HS Box switched to its other algorithm, stock 750), nothing is written until it's probed again.
+  - Going back to a firmware level writes the level's plan first, then the fields (see 1.16.3).
+- **Miner page:** a Clock box in the clock panel for these models, replacing the SC Lite's MHz / mV / PV fields (now hidden on boxes). It's locked while a preset or a running schedule is in charge and while tuning; changes are at least a minute apart.
+- **Presets** (`fan_addon.py`): box presets are clocks (`box: true`, no mV / PV, no fan curve).
+  - Profiles has *Make four from its clock*: High at the clock it runs now (capped at stock), then 25 / 50 / 75 MHz lower, not tested. Tested tuner presets are never replaced.
+  - Hand-set box presets take a clock only.
+  - Fleet, Profiles and Schedule show them as "clock only". Schedules apply them like any preset.
+  - A schedule stretch on a box keeps the fields and the plan it really ran (`held.box`) and puts them back the reliable way.
+- **Box tuner** (`asic_tuner_box.py`, new; the Tuner page shows its own form for these models). It reuses the SC Lite tuner's per-chip judging (each chip against its own normal error rate from the baseline).
+  - **Baseline:** the clock it runs now by default, never above stock.
+  - **Climb:** 25 MHz at a time up to a highest clock (by default two steps above, capped at stock; at most stock + 25), stopping at the first step that isn't clean. Every step waits 15 min first, for the SC Box's fan spike.
+  - **Confirm:** the fastest clean clock once more.
+  - **Presets:** High, Middle, Low and Lowest power 25 MHz apart, each tested (one that fails tries 25 MHz lower).
+  - **Finish:** it ends on High when High passed. Presets and the end clock never go above stock (a clean stock + 25 only shows headroom). Otherwise, and on Stop, a safety stop (88 °C on any chip sensor) or an error, it puts back exactly what the miner ran before.
+  - It never writes fans, and it stops if the stock plan changes mid-run.
+  - "Only test four presets" skips the climb.
+  - The dashboard reads the box's live setting at the start and probes it again after a run. It imports the presets with High on.
+- **Chip data on the SC Box / HS Box.** Their `/dbg/icinfo` sends its body as an object, not as text like the SC Lite. The Miner page's chip list and the tuner now read both forms; before, a real box could show no chips there.
+- The probe line, Tuner page and Miner page say what the app sets on these models instead of "read only".
+- Docs: README (Models table and the SC Box / HS Box section), TESTING.md.
+
+## 1.16.3 (2026-10-10)
+
+- **Restoring a firmware level now really applies it** (`asic_tuner.py`, `fan_addon.py` `capture_state` /
+  `restore_state`). crProductGuy's clock and voltage test on an HS Box (fw 2.2.6) showed that writing
+  `manual: false` with the same `select` leaves the boards on the last manual clock: after the test "put back" the
+  stock plan (850 MHz), port 4028 still reported 875 MHz, and the wall power stayed at the 875 MHz level. 1.16.1's
+  raw restore did exactly that write, so a tuning run or a schedule stretch that started on a stock plan could leave
+  the miner on its last test or preset clock. Now the level's own plan is written first as a manual plan (applied
+  live), then `manual` / `select` / `manualPowerplan` go back. Idle is still picked by `select` alone (a change of
+  `select` is applied). The schedule keeps the level's plan in `held.raw_plan` when it captures.
+
 ## 1.16.2 (2026-10-09)
 
 - **Graph time labels on full hours** (`addon.js`, `hourTicks`): instead of the time at fixed offsets from now

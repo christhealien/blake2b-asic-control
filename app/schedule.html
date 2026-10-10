@@ -311,7 +311,7 @@ function renderBrushes() {
   if (brush !== RS_BRUSH && brush !== ERASE && !ps.some(([k]) => k === brush)) brush = ps.length ? ps[0][0] : RS_BRUSH;
   let h = `<span class="muted" style="font-size:.85rem">Paint with</span>` + ps.map(([k, p]) => `
       <button type="button" class="brush ${k === brush ? "on" : ""}" data-k="${esc(k)}"><i style="background:var(--ramp-${shadeOf(k)})"></i>
-        ${esc(p.label)} <small>${p.idle ? "not hashing" : p.mhz ? `${p.mhz} MHz · ${p.mv} mV` : ""}</small></button>`).join("");
+        ${esc(p.label)} <small>${p.idle ? "not hashing" : p.mhz ? (p.box ? `${p.mhz} MHz` : `${p.mhz} MHz · ${p.mv} mV`) : ""}</small></button>`).join("");
   h += `<button type="button" class="brush rsb ${brush === RS_BRUSH ? "on" : ""}" data-k="${RS_BRUSH}"
       title="Click a block to restart at its start, or drag to mark several (at least an hour apart); click a mark again to remove it"><i>↻</i> Restart</button>`;
   h += `<button type="button" class="brush rsb ${brush === ERASE ? "on" : ""}" data-k="${ERASE}"
@@ -588,7 +588,7 @@ function renderStatus() {
   const st = m.tuning ? ["waiting: being tuned", "warn"] : !s.enabled ? ["off", ""] : s.paused ? ["paused", "warn"] : ["running", "ok"];
   pill.textContent = st[0]; pill.className = "pill " + st[1];
   const active = m.active_preset && m.presets[m.active_preset];
-  $("nowLine").textContent = active ? (active.idle ? "On the miner now: Idle (not hashing)" : `On the miner now: ${active.label} (${active.mhz} MHz · ${active.mv} mV · PV ${active.pv})`) : "On the miner now: no preset (its own or a hand-set clock)";
+  $("nowLine").textContent = active ? (active.idle ? "On the miner now: Idle (not hashing)" : `On the miner now: ${active.label} (${active.box ? `${active.mhz} MHz, clock only` : `${active.mhz} MHz · ${active.mv} mV · PV ${active.pv}`})`) : "On the miner now: no preset (its own or a hand-set clock)";
   $("nextLine").textContent = s.now ? `Schedule: ${s.now} since ${fmt(s.since)} · next ${s.next} at ${fmt(s.next_at)}`
     : "No schedule yet for this miner.";
   let notes = "";

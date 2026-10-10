@@ -486,7 +486,7 @@ def state() -> dict[str, Any]:
             "id": mid, "name": m.get("name") or mid, "ip": m.get("ip"),
             "presets": {k: {"label": p.get("label") or k, "ok": p.get("ok", True), "mhz": p.get("mhz"),
                             "mv": p.get("mv"), "pv": p.get("pv"), "source": p.get("source"),
-                            "fan_profile": p.get("fan_profile"), "idle": bool(p.get("idle"))} for k, p in presets.items()},
+                            "fan_profile": p.get("fan_profile"), "idle": bool(p.get("idle")), "box": bool(p.get("box"))} for k, p in presets.items()},
             "active_preset": m.get("active_preset"),
             "tuning": bool(tuner_addon.running(mid)),
             "restart_s": round(float(_restart_s(mid) or 75)),

@@ -29,9 +29,9 @@ if (-not (Test-Path (Join-Path $L "app\webui\static\profiles.html")) -or
   Copy-Item -Recurse (Join-Path $L "src\sc-lite\python") (Join-Path $L "app\python")
   Remove-Item -Recurse -Force (Join-Path $L "src")
   $files = "tuner_addon.py","tuner.html","fan_addon.py","profiles.html","schedule_addon.py","shares_addon.py","health_addon.py","miner_safety.py","notify_addon.py","rejects_addon.py","hashrate_addon.py","report_addon.py","schedule.html","addon.js",
-           "auth_addon.py","login.html","theme.css","theme.js","widget_server.py","install_addons.py"
+           "auth_addon.py","login.html","theme.css","theme.js","widget_server.py","install_addons.py","box_plan.py"
   foreach ($f in $files) { Copy-Item $f (Join-Path $L "app\webui") }
-  Copy-Item "asic_tuner.py" (Join-Path $L "app\python")
+  foreach ($f in "asic_tuner.py","asic_tuner_box.py","box_plan.py") { Copy-Item $f (Join-Path $L "app\python") }
   Push-Location (Join-Path $L "app\webui"); & $py.Source install_addons.py | Out-Null; Pop-Location
   New-Item -ItemType File -Force $built | Out-Null
   Write-Host "   add-on installed"

@@ -262,7 +262,7 @@
           after a firmware update).</p>
         <label class="check"><input type="checkbox" id="f_any_model" /> Allow miner models other than the SC Lite (untested)</label>
         <p class="hint">The tuner is tested on the SC Lite. It reads the miner's model first and changes nothing on any
-          other model unless this is ticked. SC-BOX and HS Box store their settings in a format the tuner can't use yet.</p>
+          other model unless this is ticked. An SC Box or HS Box gets its own clock tuner instead: pick one at the top of the page.</p>
       </div>
 
       <div class="fsec presets-mode hidden">
@@ -436,6 +436,72 @@
       </div>
     </section>
 
+    <!-- SC BOX / HS BOX START FORM (since 1.17) -->
+    <section class="panel hidden" id="boxPanel">
+      <h2>Tune the clock of this SC Box / HS Box</h2>
+      <p class="muted intro">On these boxes the tuner changes the <b>clock only</b>. In testing (both boxes, with a plug-in meter) a
+        0.01 V lower voltage made no measurable difference in wall power, while every 25 MHz moved power and hashrate together
+        (about 7 W on the SC Box, 4–5 W on the HS Box, at the same J/TH). So the voltage and fan fields stay exactly as the miner
+        has them, and the fans keep following its fan target (set it on the Miner page). Every setting is judged the same way
+        as on the SC Lite: by each chip's own errors against its normal rate from the baseline.</p>
+      <div class="note warn" style="margin:.2rem 0 .8rem">New for these models: watch the first steps of your first run.
+        Both test boxes made errors 25 MHz above what they ran, so a climb usually ends after one step; lower clocks were clean.</div>
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">1</span><h3>What do you want to do?</h3></div>
+        <div class="mode-cards">
+          <label class="mode-card"><input type="radio" name="bmode" value="search" id="bmSearch" checked />
+            <span><b>Find the fastest clean clock, then presets</b><small>Baseline, then 25 MHz up at a time until a clock isn't
+              clean, a longer confirm of the fastest clean one, then High / Middle / Low / Lowest power 25 MHz apart, each tested.</small></span></label>
+          <label class="mode-card"><input type="radio" name="bmode" value="presets" id="bmPresets" />
+            <span><b>Only test four presets</b><small>No climb: High is the baseline clock, then 25, 50 and 75 MHz lower, each tested.</small></span></label>
+        </div>
+      </div>
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">2</span><h3>Clocks</h3></div>
+        <div class="readout" id="bStock">—</div>
+        <div class="mode-cards" role="radiogroup" aria-label="Baseline">
+          <label class="mode-card"><input type="radio" name="bbase" value="current" id="bbCurrent" checked />
+            <span><b>What it runs now (recommended)</b><small id="bbCurrentNote">—</small></span></label>
+          <label class="mode-card"><input type="radio" name="bbase" value="custom" id="bbCustom" />
+            <span><b>My own</b><small>A clock you know it runs cleanly.</small></span></label>
+        </div>
+        <div class="form-grid">
+          <label class="bb-custom">Baseline MHz<select id="fb_start"></select></label>
+          <label class="bsearch">Highest MHz<select id="fb_max"></select></label>
+          <label>Baseline minutes<input type="number" id="fb_baseline_min" step="5" /></label>
+        </div>
+        <p class="hint">If nothing passes, or the run stops early, the miner goes back to exactly what it ran before (its manual
+          clock, or its stock plan). The climb may try up to stock + 25 MHz, but the baseline, the presets and the clock it ends on stay at stock or below
+          (a clean step above stock only tells you there's headroom).</p>
+      </div>
+      <div class="fsec">
+        <div class="fsec-h"><span class="num">3</span><h3>Tests and safety</h3></div>
+        <div class="form-grid">
+          <label class="bsearch">Minutes per test<input type="number" id="fb_hold_min" step="5" /></label>
+          <label class="bpresets">Minutes per preset<input type="number" id="fb_preset_min" step="5" /></label>
+          <label>Sensitivity<input type="number" id="fb_sigma" step="0.5" /></label>
+          <label>Abort at °C<input type="number" id="fb_abort_c" step="1" /></label>
+        </div>
+        <div class="opt-row bsearch"><label class="check"><input type="checkbox" id="fb_confirm" checked /> Confirm the fastest clean clock</label>
+          <label class="inline">for <input type="number" id="fb_confirm_min" step="5" /> min</label></div>
+        <label class="check bsearch"><input type="checkbox" id="fb_presets" checked /> Build and test presets at the end</label>
+        <p class="hint">Each step waits 15 minutes before it's watched: the SC Box's fans run near full speed for about that long after
+          any settings write. Abort: the run stops and the miner goes back if any chip sensor reaches this temperature.</p>
+      </div>
+      <div class="row" style="margin-top:.6rem">
+        <button type="button" class="primary" id="btnBoxReview">Review before starting</button>
+        <span class="muted" id="bEstimate"></span>
+      </div>
+      <div id="boxReview" class="hidden" style="margin-top:1rem;border-top:1px solid var(--line);padding-top:.8rem">
+        <h3 style="margin:0 0 .5rem;font-size:.98rem">Check before starting</h3>
+        <div id="boxReviewBody"></div>
+        <div class="row" style="margin-top:.8rem">
+          <button type="button" class="primary" id="btnBoxStart">Start tuner</button>
+          <button type="button" id="btnBoxBack">Back to edit</button>
+        </div>
+      </div>
+    </section>
+
     <!-- REVIEW -->
     <section class="panel hidden" id="reviewPanel">
       <h2>Check before starting</h2>
@@ -535,6 +601,7 @@ function showHw() {
   el.textContent = h.probing ? "probing…" : hw && hw.ok ? "Probed: " + h.line : (h.line ? "Not ready: " + h.line : "Not probed yet");
   el.style.color = hw && hw.ok ? (hw.profile === "sc-lite" ? "var(--ok)" : "var(--warn)") : "var(--warn)";
   $("btnProbe").textContent = hw && hw.ok ? "Probe again" : "Probe now";
+  syncForms(!!(lastStatus && lastStatus.running && lastStatus.miner_id === viewId));
 }
 let lastStatus = null;
 
@@ -550,6 +617,10 @@ async function api(method, path, body) {
   if (!r.ok || j.ok === false) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
+// a setting as text: an SC Box / HS Box row has no PV (its mV column holds the voltage in mV: 440 = 0.44 V)
+const isBoxRow = (pv) => pv === "" || pv == null;
+const voltTxt = (mv, pv) => isBoxRow(pv) ? `${(+mv / 1000).toFixed(2)} V` : `${mv} mV`;
+const planTxt = (mhz, mv, pv) => isBoxRow(pv) ? `${mhz} MHz · ${voltTxt(mv, pv)}` : `${mhz} MHz · ${mv} mV · PV ${pv}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const chipLabel = (k) => { const m = /^b(\d+)c(\d+)$/.exec(k || ""); return m ? `board ${m[1]} chip ${m[2]}` : (k || "—"); };
 
@@ -1055,7 +1126,7 @@ function renderPresetsBox(s) {
   const order = ["high", "middle", "low", "lowest"];
   return `<div class="preset-list">` + order.filter(k => p[k]).map(k => { const e = p[k];
     return `<div><b>${esc(e.label)} ${e.ok ? '<span class="pill ok">passed</span>' : '<span class="pill bad">failed</span>'}</b>
-      <span class="mono">${e.mhz} MHz · ${e.mv} mV · PV ${e.pv}</span><br>
+      <span class="mono">${e.box ? `${e.mhz} MHz (clock only)` : `${e.mhz} MHz · ${e.mv} mV · PV ${e.pv}`}</span><br>
       <span class="muted">${e.ok ? `${e.target_c != null ? `${e.target_c} °C · ` : ""}${e.avg_fan != null ? `fans ${e.avg_fan} % · ` : ""}${e.avg_ths ? (+e.avg_ths).toFixed(2) + " TH/s" : ""}` : esc(e.reason || "")}</span></div>`; }).join("")
     + `</div><p class="hint">${s.presets.complete ? (s.running ? "Presets done." : `Saved to this miner: see <a href="/profiles.html?miner=${encodeURIComponent(s.miner_id)}">Profiles</a>.`) : "Still building presets…"}</p>`;
 }
@@ -1064,6 +1135,21 @@ const RP_IC = { pass: "✓", fail: "✗", run: "●", todo: "–", skip: "⤼", 
 const RP_WORD = { pass: "done", fail: "failed", run: "running now", todo: "not done yet", skip: "skipped", stop: "cut short" };
 function rpParams(o, p) {
   if (!o) return "";
+  if (o.box) {
+    const rows = [["Option", o.mode === "presets" ? "Test four clock presets (no climb)" : "Find the fastest clean clock, then presets"],
+      ["Model", "SC Box / HS Box: clock only, voltage and fans as the miner has them"],
+      ["Baseline", `${o.start_mhz} MHz · ${o.baseline_min} min${o.baseline === "current" ? " (what it ran)" : " (yours)"}`],
+      ...(o.before ? [["Before the run", `${o.before.mhz} MHz at ${o.before.volts} V (where it goes back to unless High passes)`]] : [])];
+    if (o.mode !== "presets") {
+      rows.push(["Clocks", o.max_mhz > o.start_mhz ? `up to ${o.max_mhz} MHz in 25 MHz steps` : "no climb (the baseline is the highest)"]);
+      rows.push(["Confirm", o.confirm ? `${o.confirm_min} min` : "off"]);
+    }
+    rows.push(["Tests", `${o.hold_min} min each after 15 min to settle · sensitivity ${o.sigma}`]);
+    rows.push(["Presets", o.presets ? `${o.preset_min} min each, 25 MHz apart` : "off"]);
+    rows.push(["Safety", `stops at ${o.abort_c} °C`]);
+    if (p && p.started) rows.push(["Started", p.started.replace("T", " ").slice(0, 16)]);
+    return rows.map(([k, v]) => `<div><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join("");
+  }
   if (o.mode === "presets") {
     const rows = [["Option", `Rebuild the presets from ${o.source || "the last search"}`],
       ["Baseline", o.baseline === "reuse" ? `reused from ${o.source_when || "the search"}` : `${o.start_mhz} MHz · ${o.mv} mV · ${o.baseline_min} min`],
@@ -1094,9 +1180,9 @@ function rpParams(o, p) {
 }
 function rpAttempts(it) {
   return (it.attempts || []).map(a => {
-    const what = `${a.mv} mV${a.label && a.label !== "test" ? ` (${a.label})` : ""}`;
+    const what = `${isBoxRow(a.pv) ? a.mhz + " MHz" : a.mv + " mV"}${a.label && a.label !== "test" ? ` (${a.label})` : ""}`;
     const why = a.state === "pass" ? "" : a.state === "run" ? " · running now" : a.why ? ` · ${a.why}` : "";
-    return `<span class="st-${a.state}" title="${esc(`${a.mhz} MHz · ${a.mv} mV · PV ${a.pv}: ${RP_WORD[a.state] || a.state}${a.why ? " — " + a.why : ""}`)}">${RP_IC[a.state] || ""}</span> <b>${esc(what)}</b>${esc(why)}`;
+    return `<span class="st-${a.state}" title="${esc(`${planTxt(a.mhz, a.mv, a.pv)}: ${RP_WORD[a.state] || a.state}${a.why ? " — " + a.why : ""}`)}">${RP_IC[a.state] || ""}</span> <b>${esc(what)}</b>${esc(why)}`;
   }).join(" &nbsp;→&nbsp; ") || (it.note ? esc(it.note) : it.detail ? esc(it.detail) : "");
 }
 function renderPlan(s) {
@@ -1137,6 +1223,7 @@ function render(s) {
   $("btnStop").classList.toggle("hidden", !running);
   if (running) { $("formPanel").classList.add("hidden"); $("reviewPanel").classList.add("hidden"); }
   else if ($("reviewPanel").classList.contains("hidden")) $("formPanel").classList.remove("hidden");
+  syncForms(running);
   $("btnReview").disabled = !s.script_found;
   if (!s.script_found) toast(`asic_tuner.py not found in ${s.folder}`, true);
   $("folder").textContent = `Tuner files: ${s.folder}`;
@@ -1150,7 +1237,7 @@ function render(s) {
     $("curEmpty").classList.add("hidden"); $("curBody").classList.remove("hidden");
     const hold = +last.hold_min || 25, el = +last.elapsed_min || 0;
     $("curTitle").textContent = PHASE[last.phase] || "Current test";
-    $("curPlan").textContent = `${last.mhz} MHz · ${last.mv} mV · PV ${last.pv}`;
+    $("curPlan").textContent = planTxt(last.mhz, last.mv, last.pv);
     $("curPhase").textContent = last.phase;
     $("curBar").style.width = Math.min(100, el / hold * 100) + "%";
     $("curProgress").textContent = `${el.toFixed(1)} / ${hold} min`;
@@ -1178,7 +1265,7 @@ function render(s) {
   // best
   if (s.best) {
     const b = s.best;
-    $("bestBody").innerHTML = `<span class="big" style="color:var(--ok)">${esc(b.mhz)} MHz · ${esc(b.mv)} mV · PV ${esc(b.pv)}</span>
+    $("bestBody").innerHTML = `<span class="big" style="color:var(--ok)">${esc(planTxt(b.mhz, b.mv, b.pv))}</span>
       <span class="pill ${s.best_confirmed ? "ok" : "warn"}" style="margin-left:.6rem">${s.best_confirmed ? "confirmed" : "not confirmed yet"}</span>
       <span class="muted" style="margin-left:.6rem">${b.avg_ths ? (+b.avg_ths).toFixed(2) + " TH/s" : ""}</span>` + renderPresetsBox(s);
   } else $("bestBody").innerHTML = (((s.info || {}).options || {}).mode === "presets"
@@ -1196,7 +1283,7 @@ function render(s) {
   $("resBody").innerHTML = rows.length ? rows.map(r => {
     const cls = (r.result.startsWith("PASS") || r.result === "CONFIRMED") ? "res-pass" : r.result === "BASELINE" ? "res-base" : "res-fail";
     return `<tr class="pick" data-key='${esc(testKey(r))}' title="Show this test on the chip map"><td class="mono">${esc(r.time.replace("T", " ").slice(5, 16))}</td><td class="num">${esc(r.mhz)}</td>
-      <td class="num">${esc(r.mv)}</td><td class="num">${esc(r.pv)}</td><td class="${cls}">${esc(r.result)}</td>
+      <td class="num">${esc(isBoxRow(r.pv) ? voltTxt(r.mv, r.pv) : r.mv)}</td><td class="num">${isBoxRow(r.pv) ? "—" : esc(r.pv)}</td><td class="${cls}">${esc(r.result)}</td>
       <td class="num">${r.avg_ths ? (+r.avg_ths).toFixed(2) : "—"}</td>${(() => { const w = estW(+r.mhz, +r.pv);
         return `<td class="num">${w ? Math.round(w) : "—"}</td><td class="num">${w && +r.avg_ths > 0.05 ? Math.round(w / r.avg_ths) : "—"}</td>`; })()}<td class="num">${r.max_temp ? (+r.max_temp).toFixed(1) : "—"}</td><td>${esc(r.reason)}</td></tr>`;
   }).join("") : `<tr><td colspan="10" class="muted">None yet.</td></tr>`;
@@ -1207,6 +1294,89 @@ function render(s) {
   fillMapSel(s.results || []);
   markPicked();
   if (mapSel === "live" || !mapData) loadMap();
+}
+
+
+// ---------------- SC Box / HS Box form (since 1.17) ----------------
+const BT = () => (HW[viewId] || {}).box_tuner;
+let boxFilledFor = null;
+const bMode = () => (document.querySelector("input[name=bmode]:checked") || {}).value || "search";
+const bBase = () => (document.querySelector("input[name=bbase]:checked") || {}).value || "current";
+function boxFill(force) {
+  const t = BT(); if (!t) return;
+  if (boxFilledFor === viewId && !force) return;
+  boxFilledFor = viewId;
+  const d = t.defaults, run = t.running;
+  const opt = (lo, hi, sel) => { let o = ""; for (let c = hi; c >= lo; c -= t.grid) o += `<option value="${c}"${c === sel ? " selected" : ""}>${c} MHz${c === t.stock ? " (stock)" : ""}${c === run ? " (now)" : ""}${c > t.stock ? " (above stock)" : ""}</option>`; return o; };
+  $("fb_start").innerHTML = opt(t.lo, t.hi, run && run % t.grid === 0 ? Math.min(run, t.hi) : t.hi);   // a baseline is never above stock
+  $("fb_max").innerHTML = opt(t.lo, t.tune, d.max_mhz);
+  for (const k of ["baseline_min", "hold_min", "confirm_min", "preset_min", "sigma", "abort_c"]) $("fb_" + k).value = d[k];
+  $("bStock").innerHTML = `Stock <b>${esc(t.stock)} MHz</b>${run ? ` · runs now <b>${esc(run)} MHz</b>${t.volts ? ` at ${esc(t.volts)} V` : ""}` : ""}
+    <span class="muted" style="font-size:.85rem">(at the last probe; the voltage stays as it is throughout)</span>`;
+  $("bbCurrentNote").textContent = run ? `${run} MHz at the last probe${run % t.grid ? `: off the ${t.grid} MHz grid, so pick your own` : ""}.` : "Not known: press Probe now.";
+  if (run && run % t.grid) $("bbCustom").checked = true;
+  boxSync();
+}
+function boxSync() {
+  const t = BT(); if (!t) return;
+  const search = bMode() === "search";
+  document.querySelectorAll("#boxPanel .bsearch").forEach(e => e.style.display = search ? "" : "none");
+  document.querySelectorAll("#boxPanel .bpresets").forEach(e => e.style.display = search && !$("fb_presets").checked ? "none" : "");
+  document.querySelectorAll("#boxPanel .bb-custom").forEach(e => e.style.display = bBase() === "custom" ? "" : "none");
+  const b = boxBody(), m = (x) => +x || 0, settle = 15;
+  const climb = search ? Math.max(0, (b.max_mhz - b.start_mhz) / t.grid) : 0;
+  let lo = settle + m(b.baseline_min), hi = lo;
+  if (search) {
+    lo += Math.min(1, climb) * (settle + m(b.hold_min)); hi += climb * 2 * (settle + m(b.hold_min));
+    if (b.confirm && climb) hi += settle + m(b.confirm_min);
+  }
+  if (b.presets) { lo += 3 * (settle + m(b.preset_min)); hi += 3 * 2 * (settle + m(b.preset_min)) + (climb ? settle + m(b.preset_min) : 0); }
+  const h = (x) => x >= 90 ? `${(x / 60).toFixed(1)} h` : `${Math.round(x)} min`;
+  $("bEstimate").textContent = `about ${h(lo)}${hi > lo + 10 ? `–${h(hi)}` : ""}`;
+}
+function boxBody() {
+  const t = BT() || {}, run = t.running;
+  return { miner_id: viewId, mode: bMode(), baseline: bBase(),
+           start_mhz: bBase() === "custom" ? +$("fb_start").value : run, max_mhz: +$("fb_max").value,
+           baseline_min: +$("fb_baseline_min").value, hold_min: +$("fb_hold_min").value,
+           confirm: $("fb_confirm").checked, confirm_min: +$("fb_confirm_min").value,
+           presets: bMode() === "presets" || $("fb_presets").checked, preset_min: +$("fb_preset_min").value,
+           sigma: +$("fb_sigma").value, abort_c: +$("fb_abort_c").value };
+}
+document.querySelectorAll("#boxPanel input, #boxPanel select").forEach(i => i.addEventListener("change", () => { boxSync(); $("boxReview").classList.add("hidden"); }));
+$("btnBoxReview").onclick = () => {
+  const t = BT(); if (!t) return;
+  const b = boxBody(), bad = [], warn = [];
+  if (!b.start_mhz) bad.push("The clock it runs now isn't known: press Probe now, or pick your own baseline.");
+  if (b.mode === "search" && b.max_mhz < b.start_mhz) bad.push("The highest clock can't be below the baseline.");
+  if (b.mode === "search" && b.max_mhz > t.stock) warn.push(`${b.max_mhz} MHz is above stock (${t.stock} MHz). Both test boxes made errors 25 MHz above what they ran; the climb stops at the first clock that isn't clean.`);
+  if (b.start_mhz > t.stock) warn.push(`The baseline ${b.start_mhz} MHz is above stock.`);
+  const steps = [];
+  steps.push(`<b>Baseline:</b> ${b.start_mhz} MHz${t.volts ? ` at ${esc(t.volts)} V` : ""} for ${b.baseline_min} min (after 15 min to settle): learns every chip's normal error rate.`);
+  if (b.mode === "search") {
+    steps.push(b.max_mhz > b.start_mhz ? `<b>Climb:</b> ${b.start_mhz + t.grid} up to ${b.max_mhz} MHz, 25 MHz at a time, ${b.hold_min} min each; it stops at the first clock that isn't clean (one retest unless it failed clearly).` : "<b>Climb:</b> none (the highest clock is the baseline).");
+    if (b.confirm && b.max_mhz > b.start_mhz) steps.push(`<b>Confirm:</b> the fastest clean clock once more for ${b.confirm_min} min.`);
+  }
+  if (b.presets) steps.push(`<b>Presets:</b> High (${b.mode === "search" ? "the fastest confirmed clock, or the baseline" : "the baseline clock"}), then 25, 50 and 75 MHz lower, ${b.preset_min} min each; one that fails tries 25 MHz lower.`);
+  steps.push(`<b>Finish:</b> it ends on High if High passed; otherwise, or if it stops early, it goes back to what it ran before (${t.running ? t.running + " MHz" : "its setting"}).`);
+  $("boxReviewBody").innerHTML = (bad.length ? `<div style="color:var(--bad);margin:.3rem 0">${bad.map(esc).join("<br>")}</div>` : "")
+    + (warn.length ? `<div class="note warn">${warn.map(esc).join("<br>")}</div>` : "")
+    + `<ol class="review-steps">${steps.map(x => `<li>${x}</li>`).join("")}</ol><p class="muted">${esc($("bEstimate").textContent)}. Close the miner's own settings page while it runs.</p>`;
+  $("btnBoxStart").disabled = bad.length > 0;
+  $("boxReview").classList.remove("hidden");
+  $("boxReview").scrollIntoView({ behavior: "smooth", block: "nearest" });
+};
+$("btnBoxBack").onclick = () => $("boxReview").classList.add("hidden");
+$("btnBoxStart").onclick = async () => {
+  $("btnBoxStart").disabled = true;
+  try { await api("POST", "/api/tuner/start", boxBody()); toast("Tuner started"); $("boxReview").classList.add("hidden"); }
+  catch (e) { toast(e.message, true); }
+  finally { $("btnBoxStart").disabled = false; refresh(); }
+};
+function syncForms(running) {
+  const box = !!BT();
+  $("boxPanel").classList.toggle("hidden", running || !box);
+  if (box) { $("formPanel").classList.add("hidden"); $("reviewPanel").classList.add("hidden"); boxFill(false); }
 }
 
 // ---------------- chip map ----------------

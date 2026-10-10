@@ -28,8 +28,8 @@ if [ ! -f "$L/app/webui/static/profiles.html" ] || [ "$HERE/install_addons.py" -
   cp -r "$L/src/sc-lite/python" "$L/app/python"
   rm -rf "$L/src"
   cp tuner_addon.py tuner.html fan_addon.py profiles.html schedule_addon.py shares_addon.py health_addon.py miner_safety.py notify_addon.py rejects_addon.py hashrate_addon.py report_addon.py schedule.html addon.js \
-     auth_addon.py login.html theme.css theme.js widget_server.py install_addons.py "$L/app/webui/"
-  cp asic_tuner.py "$L/app/python/"
+     auth_addon.py login.html theme.css theme.js widget_server.py install_addons.py box_plan.py "$L/app/webui/"
+  cp asic_tuner.py asic_tuner_box.py box_plan.py "$L/app/python/"
   (cd "$L/app/webui" && "$PY" install_addons.py >/dev/null && echo "   add-on installed")
   touch "$L/app/.built"
 fi

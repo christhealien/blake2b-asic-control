@@ -31,6 +31,8 @@ Routes (all behind the login):
   POST /api/hardware/power_cal    {miner_id, watts, mhz, pv} or {miner_id, clear}  calibrate the power estimate
   POST /api/hardware/mains        {mains_v}  mains voltage for the amps
   POST /api/fans/temp_source      {miner_id, source: "board"|"chip"}  what the fan curve follows
+  GET  /api/hardware/box_clock?miner=, POST {miner_id, mhz}   an SC Box / HS Box clock (since 1.17)
+  POST /api/presets/box_defaults  {miner_id, replace}  four clock-only presets for a box from its clock
 
 
 guard_post() runs before the dashboard's own POST routes: while a miner is being tuned it
@@ -56,6 +58,7 @@ import fan_controller
 import health_addon
 import schedule_addon
 import shares_addon
+import box_plan
 import tuner_addon
 import notify_addon
 import rejects_addon
@@ -396,6 +399,7 @@ def import_presets() -> list[str]:
     """Take the presets of every finished tuning run that hasn't been imported yet."""
     srv = _srv()
     done: list[str] = []
+    boxes: list[str] = []
     doc = None
     for mid, r in tuner_addon.runs().items():
         if r["running"]:
@@ -418,7 +422,8 @@ def import_presets() -> list[str]:
         name = str(row.get("name") or mid)
         curves = dict(doc.get("profiles") or {})
         old_all = dict((doc.get("presets") or {}).get(mid) or {})
-        rebuilt = pdoc.get("mode") == "presets"
+        # (a box run, presets-only too, ends on its High like a search: its presets replace the tuner ones)
+        rebuilt = pdoc.get("mode") == "presets" and not pdoc.get("box")
         # a search replaces all the tuner presets (your own stay). A rebuild (presets only) replaces only the
         # ones it tested, and a preset it couldn't pass keeps the old version if that one had passed.
         mine = dict(old_all) if rebuilt else {k: v for k, v in old_all.items() if v.get("source") != "tuner"}
@@ -442,6 +447,7 @@ def import_presets() -> list[str]:
                                    "abort_c": min(CURVE_DEFAULTS["abort_c"], float(e["curve"][-1]["temp"]) + 6)}
             mine[key] = {
                 "label": label, "mhz": e.get("mhz"), "mv": e.get("mv"), "pv": e.get("pv"),
+                **({"box": True} if e.get("box") else {}),
                 "fan_profile": fan_key, "source": "tuner", "ok": bool(e.get("ok")),
                 "target_c": e.get("target_c"), "avg_fan": e.get("avg_fan"), "avg_ths": e.get("avg_ths"),
                 "max_t": e.get("max_t"), "watched_min": e.get("watched_min"),
@@ -469,9 +475,13 @@ def import_presets() -> list[str]:
                 fc.update(enabled=True, profile=high["fan_profile"], fan_offset=0)
                 row["fan_control"] = fc
         done.append(mid)
+        if pdoc.get("box"):
+            boxes.append(mid)
     if done and doc is not None:
         srv.save_registry_doc(doc)
         print(f"[presets] imported tuner presets for {', '.join(done)}", flush=True)
+    for mid in boxes:       # the run changed its clock: read the box again so its page shows what it runs now
+        threading.Thread(target=lambda m=mid: _safe_probe(m), daemon=True, name=f"probe-{mid}").start()
     return done
 
 
@@ -559,7 +569,14 @@ def save_preset(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unknown miner {mid}")
     if str(body.get("key") or "") == "idle":
         raise ValueError("Idle is the firmware's own mode and can't be edited")
-    mhz, mv, pv = _check_plan(body, row.get("hardware"))
+    box = is_box(row.get("hardware"))
+    if box:     # SC Box / HS Box: a clock only (their voltage stays as the miner has it, their fans follow its target)
+        mhz, mv, pv = box_plan.check_clock(body.get("mhz"), box_stock_mhz(row["hardware"])), None, None
+        if body.get("fan_profile"):
+            raise ValueError("an SC Box / HS Box preset can't have a fan curve: its firmware steers the fans to its "
+                             "fan target (set that on the miner's page)")
+    else:
+        mhz, mv, pv = _check_plan(body, row.get("hardware"))
     label = re.sub(r"[<>\"'`&]", "", str(body.get("label") or "")).strip()[:32]   # a name, never markup
     if not label:
         raise ValueError("give the preset a name")
@@ -579,6 +596,10 @@ def save_preset(body: dict[str, Any]) -> dict[str, Any]:
     changed_clock = not old or (old.get("mhz"), old.get("mv"), old.get("pv")) != (mhz, mv, pv)
     new = dict(old or {})
     new.update(label=label, mhz=mhz, mv=mv, pv=pv, fan_profile=fan_key)
+    if box:
+        new["box"] = True
+    else:
+        new.pop("box", None)
     if changed_clock:   # hand-set clocks are not tested
         new.update(source="manual", ok=True, reason="set by hand, not tested", tested="")
         for k in ("avg_ths", "avg_fan", "max_t", "watched_min", "target_c"):
@@ -627,6 +648,16 @@ def apply_preset(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("this miner hasn't been probed yet; press Probe now first")
     if p.get("idle"):
         return _apply_idle(srv, mid, row)
+    if p.get("box") or is_box(row.get("hardware")):
+        if not p.get("box"):
+            raise ValueError(f"{p.get('label')} is an SC Lite preset (clock, mV and PV); this miner is an SC Box / HS Box")
+        text = box_write(mid, p.get("mhz"))      # checks it's still a box, the clock range, and no tuning run
+        doc = srv.load_registry_doc()
+        for m in doc.get("miners") or []:
+            if _row_id(m) == mid:
+                m["active_preset"] = key
+        srv.save_registry_doc(doc)
+        return {"ok": True, "plan": text, "fan_profile": None}
     _check_plan(p, row.get("hardware"))      # again now: limits follow the miner's current probe
     client = srv.get_client(mid)
     s = client.api("GET", "/mcb/setting")
@@ -695,10 +726,23 @@ def capture_state(mid: str) -> dict[str, Any]:
     s = srv.get_client(mid).api("GET", "/mcb/setting")
     if not isinstance(s, dict) or "manual" not in s:
         raise ValueError("couldn't read what the miner runs now (its settings didn't come back)")
+    if box_plan.parse(box_plan.running_text(s)):
+        # an SC Box / HS Box: its fields, and the plan it really runs (written first when going back)
+        held["box"] = {"raw": {k: s.get(k) for k in box_plan.FIELDS}, "run": box_plan.running_text(s)}
+        return held
     if not s.get("manual"):
         # it runs a firmware level (its stock plan or its Idle mode): manualPowerplan isn't what runs then,
         # so remember the fields that pick the level and put exactly those back
         held["raw"] = {k: s.get(k) for k in ("manual", "select", "manualPowerplan")}
+        try:   # the level's own plan, written first when going back (turning manual off alone doesn't apply it)
+            sel = str(s.get("select") or 0)
+            info = next((str(p.get("info") or "") for p in s.get("powerplans") or []
+                         if isinstance(p, dict) and str(p.get("level")) == sel), "")
+            m, v, _a, _b, pv = parse_plan(info)
+            if m > 0:
+                held["raw_plan"] = {"mhz": m, "mv": v, "pv": pv}
+        except Exception:
+            pass       # Idle ("0 MHz 0 V"): picked by select alone
         return held
     m, v, _a, _b, pv = parse_plan(str(s.get("manualPowerplan") or ""))
     held["plan"] = {"mhz": m, "mv": v, "pv": pv}
@@ -723,6 +767,22 @@ def restore_state(mid: str, held: dict[str, Any]) -> dict[str, Any]:
         s.update(manual=True, select=0, manualPowerplan=build_plan(mhz, mv, fa, fb, pv))
         client.api("PUT", "/mcb/setting", s)
         r = {"ok": True, "plan": s["manualPowerplan"]}
+    elif isinstance(held.get("box"), dict):
+        b = held["box"]
+        _box_row(mid)
+        if tuner_addon.running(mid):
+            raise ValueError("a tuning run is going on this miner; stop it first")
+        # (what it ran before is put back as it was, even a clock the app itself wouldn't set)
+        get, put = _box_io(srv.get_client(mid))
+        try:
+            kept = box_plan.put_back(get, put, b.get("raw") or {}, str(b.get("run") or ""))
+        except RuntimeError as e:
+            raise ValueError(str(e)) from None
+        if not kept:
+            raise ValueError("the miner didn't keep the setting it was put back on; set it by hand")
+        raw = b.get("raw") or {}
+        _box_note_running(mid, str(b.get("run") or ""), bool(raw.get("manual")), str(raw.get("manualPowerplan") or "") or None)
+        r = {"ok": True, "plan": b.get("run")}
     elif isinstance(held.get("raw"), dict):
         client = srv.get_client(mid)
         s = client.api("GET", "/mcb/setting")
@@ -731,6 +791,20 @@ def restore_state(mid: str, held: dict[str, Any]) -> dict[str, Any]:
         raw = {k: v for k, v in held["raw"].items() if k in ("manual", "select", "manualPowerplan") and v is not None}
         if "manual" not in raw or "select" not in raw:
             raise ValueError("the saved setting to go back to is incomplete; set the miner by hand")
+        rp = held.get("raw_plan")
+        if rp and not raw.get("manual"):
+            # turning manual off doesn't make the firmware run its level again (the HS Box kept the last
+            # clock written): write the level's plan first, which applies at once, then the fields
+            from miner_client import build_plan, parse_plan
+            doc = srv.load_registry_doc()
+            row = next((m for m in doc.get("miners") or [] if _row_id(m) == mid), {})
+            mhz, mv, pv = _check_plan(rp, row.get("hardware"))
+            _m, _v, fa, fb, _pv = parse_plan(s.get("manualPowerplan") or "")
+            s.update(manual=True, manualPowerplan=build_plan(mhz, mv, fa, fb, pv))
+            client.api("PUT", "/mcb/setting", s)
+            s = client.api("GET", "/mcb/setting")
+            if not isinstance(s, dict):
+                raise ValueError("couldn't read the miner's settings")
         s.update(raw)
         client.api("PUT", "/mcb/setting", s)
         r = {"ok": True, "plan": "its own firmware level"}
@@ -766,6 +840,8 @@ def _chips_per_board(client: Any) -> list[int] | None:
             raw = json.loads(raw["body"])
         elif isinstance(raw, str):
             raw = json.loads(raw)
+        if isinstance(raw, dict) and isinstance(raw.get("body"), dict) and "drawdata" not in raw:
+            raw = raw["body"]      # the SC Box / HS Box send it as an object, the SC Lite as text
         dd = raw.get("drawdata") if isinstance(raw, dict) else None
         if isinstance(dd, list) and dd:
             return [len(b or []) for b in dd]
@@ -973,6 +1049,171 @@ def set_fan_target(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"the miner didn't keep {want:g} °C (it reports {after.get('value')}); nothing else was changed")
     return {"ok": True, "miner_id": mid, "value": want, "from": before, "min": ft["min"], "max": ft["max"],
             "changed": want != before}
+
+
+# ---------------------------------------------------------------- SC Box / HS Box clock (since 1.17)
+# The clock is the one setting the app changes on these boxes (box_plan has the details and the test results):
+# presets are clock-only, the voltage and fan fields stay as the miner has them.
+
+BOX_CLOCK_GAP_S = 60       # between two hand-set clock writes to one box (a double click, two tabs)
+_box_last: dict[str, float] = {}
+_box_lock = threading.Lock()
+
+
+def box_problem(hw: dict[str, Any] | None) -> str:
+    """Why the app can't set this miner's clock as a box ('' if it can)."""
+    hw = hw or {}
+    if not hw.get("ok"):
+        return "this miner hasn't been probed yet; press Probe now first"
+    if hw.get("plan_format") != "box":
+        return "box clock settings are only for the SC Box and HS Box"
+    sm = (hw.get("stock_read") or {}).get("mhz")
+    if not sm:
+        return "this miner's firmware didn't report its stock plan at the last probe; press Probe now"
+    if not box_plan.STOCK_RANGE[0] <= int(sm) <= box_plan.STOCK_RANGE[1]:
+        return (f"this miner reports a stock clock of {sm} MHz, outside what the app handles "
+                f"({box_plan.STOCK_RANGE[0]}-{box_plan.STOCK_RANGE[1]}), so its clock isn't changed")
+    return ""
+
+
+def is_box(hw: dict[str, Any] | None) -> bool:
+    return not box_problem(hw)
+
+
+def box_stock_mhz(hw: dict[str, Any]) -> int:
+    return int((hw.get("stock_read") or {})["mhz"])
+
+
+def box_limits(hw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not is_box(hw):
+        return None
+    lim = box_plan.limits(box_stock_mhz(hw or {}))
+    run = (hw or {}).get("running_read") or {}
+    return {**lim, "grid": box_plan.GRID, "running": run.get("mhz"), "volts": run.get("volts"),
+            "manual": (hw or {}).get("manual")}
+
+
+def _box_io(client: Any) -> tuple[Callable[[], dict], Callable[[dict], Any]]:
+    return (lambda: client.api("GET", "/mcb/setting")), (lambda s: client.api("PUT", "/mcb/setting", s))
+
+
+def _box_row(mid: str) -> dict[str, Any]:
+    row = next((m for m in _srv().load_registry() if _row_id(m) == mid), None)
+    if not row:
+        raise ValueError(f"unknown miner {mid}")
+    why = box_problem(row.get("hardware"))
+    if why:
+        raise ValueError(why)
+    return row
+
+
+def _safe_probe(mid: str) -> None:
+    try:
+        probe_hardware(mid)
+    except Exception as e:
+        print(f"[probe] {mid}: {e}", flush=True)
+
+
+def _box_note_running(mid: str, text: str, manual: bool = True, live: str | None = None) -> None:
+    """Keep the stored probe in step with what was just written (the next probe reads it fresh anyway)."""
+    doc = _srv().load_registry_doc()
+    for m in doc.get("miners") or []:
+        if _row_id(m) == mid and isinstance(m.get("hardware"), dict):
+            m["hardware"].update(manual=manual, running_text=text, live_text=live or text, running_read=read_any_plan(text))
+    _srv().save_registry_doc(doc)
+
+
+def box_write(mid: str, mhz: Any) -> str:
+    """Write a clock to a box (a preset, a schedule, the clock control). Refused while a tuning run is on it."""
+    row = _box_row(mid)
+    if tuner_addon.running(mid):
+        raise ValueError("a tuning run is going on this miner; stop it first")
+    stock = box_stock_mhz(row["hardware"])
+    v = box_plan.check_clock(mhz, stock)
+    get, put = _box_io(_srv().get_client(mid))
+    with tuner_addon._start_lock:       # a tuning run can't start halfway through this write (it reads the setting first)
+        if tuner_addon.running(mid):
+            raise ValueError("a tuning run is going on this miner; stop it first")
+        try:
+            text = box_plan.write_clock(get, put, v, stock_mhz=stock)
+        except RuntimeError as e:
+            raise ValueError(str(e)) from None
+    _box_note_running(mid, text)
+    return text
+
+
+def box_clock_state(mid: str) -> dict[str, Any]:
+    """What the box runs now and the clocks it may be set to (one settings read)."""
+    row = _box_row(mid)
+    s = _srv().get_client(mid).api("GET", "/mcb/setting")
+    if not isinstance(s, dict):
+        raise ValueError("couldn't read the miner's settings")
+    run, stock = box_plan.running_text(s), box_plan.stock_text(s)
+    return {"ok": True, "miner_id": mid, "running": box_plan.parse(run), "running_text": run or None,
+            "stock": box_plan.parse(stock), "manual": bool(s.get("manual")),
+            "limits": box_limits(row["hardware"])}
+
+
+def set_box_clock(body: dict[str, Any]) -> dict[str, Any]:
+    """The Miner page's clock control for a box: like a hand-set clock on the SC Lite, it's locked while a preset
+    or a running schedule is in charge (take manual control first) and while tuning."""
+    mid = str(body.get("miner_id") or "")
+    row = _box_row(mid)
+    v = box_plan.check_clock(body.get("mhz"), box_stock_mhz(row["hardware"]))
+    held = in_charge(_srv().load_registry_doc(), mid)
+    if held:
+        raise ValueError(f"locked: this miner is run by {' and '.join(held)}. Take manual control on its page first, "
+                         "or apply a preset instead")
+    with _box_lock:
+        left = BOX_CLOCK_GAP_S - (time.time() - _box_last.get(mid, 0.0))
+        if left > 0:
+            raise ValueError(f"the clock was just changed; try again in {int(left) + 1} s")
+        _box_last[mid] = time.time()
+    try:
+        text = box_write(mid, v)
+    except Exception:
+        _box_last.pop(mid, None)       # nothing kept: the next try needn't wait
+        raise
+    return {"ok": True, "miner_id": mid, "plan": text, "mhz": v}
+
+
+BOX_PRESET_STEPS = (("high", "High", 0), ("middle", "Middle", 1), ("low", "Low", 2), ("lowest", "Lowest power", 3))
+
+
+def box_default_presets(body: dict[str, Any]) -> dict[str, Any]:
+    """Four clock-only presets for a box, from the clock it runs now (capped at stock): High, then 25 / 50 / 75 MHz
+    lower. Hand-set, not tested (the box tuner tests them). Presets it already has keep their place unless
+    replace is true; tested tuner presets are never replaced here."""
+    mid = str(body.get("miner_id") or "")
+    srv = _srv()
+    doc = srv.load_registry_doc()
+    row = next((m for m in doc.get("miners") or [] if _row_id(m) == mid), None)
+    if not row:
+        raise ValueError(f"unknown miner {mid}")
+    hw = row.get("hardware") or {}
+    why = box_problem(hw)
+    if why:
+        raise ValueError(why)
+    lim = box_plan.limits(box_stock_mhz(hw))
+    run = int((hw.get("running_read") or {}).get("mhz") or lim["hi"])
+    top = min(lim["hi"], run // box_plan.GRID * box_plan.GRID)
+    if top < lim["lo"]:
+        raise ValueError(f"it runs {run} MHz, below the lowest clock the app sets ({lim['lo']} MHz): set a clock first")
+    mine = dict((doc.get("presets") or {}).get(mid) or {})
+    made = []
+    for key, label, n in BOX_PRESET_STEPS:
+        mhz = top - n * box_plan.GRID
+        old = mine.get(key)
+        if mhz < lim["lo"] or (old and (old.get("source") == "tuner" or not body.get("replace"))):
+            continue
+        mine[key] = {"label": label, "mhz": mhz, "mv": None, "pv": None, "box": True, "fan_profile": None,
+                     "source": "manual", "ok": True, "reason": "set by hand, not tested", "tested": ""}
+        made.append(key)
+        if row.get("active_preset") == key:
+            row["active_preset"] = None
+    doc.setdefault("presets", {})[mid] = mine
+    srv.save_registry_doc(doc)
+    return {"ok": True, "made": made, "top": top}
 
 
 def probe_hardware(mid: str) -> dict[str, Any]:
@@ -1245,7 +1486,7 @@ def hardware_list() -> dict[str, Any]:
                     "preset": (f"{p.get('label')} ({'tuned' if p.get('source') == 'tuner' and p.get('ok') else 'hand-set'})"
                                if p else None),
                     "presets": {k: {"label": v.get("label") or k, "mhz": v.get("mhz"), "mv": v.get("mv"), "pv": v.get("pv"),
-                                    "tuned": v.get("source") == "tuner", "idle": bool(v.get("idle")),
+                                    "tuned": v.get("source") == "tuner", "idle": bool(v.get("idle")), "box": bool(v.get("box")),
                                     "power": estimate_watts(power_model(doc, m), v.get("mhz"), v.get("pv"))}
                                 for k, v in ((doc.get("presets") or {}).get(mid) or {}).items() if v.get("ok") is not False},
                     "active": m.get("active_preset"),
@@ -1253,6 +1494,8 @@ def hardware_list() -> dict[str, Any]:
                     "schedule_paused": bool(((doc.get("schedules") or {}).get(mid) or {}).get("paused")),
                     "tuning": bool(tuner_addon.running(mid)),
                     "tuner": tuner_addon.plan_limits(hw),
+                    "box": box_limits(hw),
+                    "box_tuner": tuner_addon.box_tuner_limits(hw),
                     "in_charge": in_charge(doc, mid),
                     "power_model": power_model(doc, m),
                     "health": _health.get(mid),
@@ -1290,6 +1533,8 @@ def chips(mid: str, force: bool = False) -> dict[str, Any]:
         raw = json.loads(raw["body"])
     elif isinstance(raw, str):
         raw = json.loads(raw)
+    if isinstance(raw, dict) and isinstance(raw.get("body"), dict) and "drawdata" not in raw:
+        raw = raw["body"]      # the SC Box / HS Box send it as an object, the SC Lite as text
     if not isinstance(raw, dict) or not isinstance(raw.get("drawdata"), list):
         raise ValueError("this miner doesn't report per-chip data (/dbg/icinfo)")
     boards = []
@@ -1735,6 +1980,7 @@ def state() -> dict[str, Any]:
                        "tuning": bool(tuner_addon.running(mid)),
                        "hardware": row.get("hardware"), "hardware_line": hw_line(row.get("hardware")),
                        "probing": mid in _probing,
+                       "box": box_limits(row.get("hardware")),
                        "tuner_fans": tuner_addon.fan_owner(mid),
                        "chip_offset": chip_offset(mid)})
     return {
@@ -1935,11 +2181,11 @@ def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
     if path == "/api/settings/share_scale":
         json_response(handler, 200, scale_state())
         return True
-    if path == "/api/hardware/fan_target":
+    if path in ("/api/hardware/fan_target", "/api/hardware/box_clock"):
         from urllib.parse import parse_qs, urlparse
         mid = (parse_qs(urlparse(handler.path).query).get("miner") or [""])[0]
         try:
-            json_response(handler, 200, fan_target_state(mid))
+            json_response(handler, 200, (fan_target_state if path.endswith("fan_target") else box_clock_state)(mid))
         except ValueError as e:
             json_response(handler, 400, {"ok": False, "error": str(e).strip("'")})
         except Exception as e:
@@ -1969,7 +2215,8 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
           "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, **schedule_addon.ROUTES_POST,
           "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale,
-          "/api/hardware/fan_target": set_fan_target, **notify_addon.ROUTES_POST}.get(path)
+          "/api/hardware/fan_target": set_fan_target, "/api/hardware/box_clock": set_box_clock,
+          "/api/presets/box_defaults": box_default_presets, **notify_addon.ROUTES_POST}.get(path)
     if not fn:
         return False
     try:

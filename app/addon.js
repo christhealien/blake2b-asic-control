@@ -297,6 +297,8 @@
 
   // ------------------------------------------------------------ Fleet cards: preset buttons
   const ORDER = ["high", "middle", "low", "lowest"];
+  // a preset's numbers as text: an SC Box / HS Box preset is a clock only
+  const pText = (p) => p.box ? `${p.mhz} MHz (clock only)` : `${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}`;
   const SHORT = { high: "High", middle: "Mid", low: "Low", lowest: "Lowest" };
   window.sclPresetRow = (id) => {
     if (String(id).startsWith("demo-")) return `<span class="muted" style="font-size:.8rem">Presets: (demo miner)</span>`;
@@ -306,7 +308,7 @@
     const btns = keys.map(k => {
       const p = ps[k], on = h.active === k;
       return `<button type="button" class="scl-pbtn ${on ? "active" : ""}${p.idle ? " scl-idle" : ""}" data-preset="${esc(k)}" data-id="${esc(id)}" ${h.tuning ? "disabled" : ""}
-        title="${esc(p.idle ? `Idle: the firmware's own Idle mode, the hash boards stop (no hashing). Any other preset wakes it.${on ? " — on the miner now" : ""}` : `${p.label}: ${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}${p.tuned ? " (tuned)" : " (hand-set)"}${on ? " — on the miner now" : ""}`)}">${p.idle ? '<span aria-label="Idle">☾</span>' : esc(SHORT[k] || p.label)}</button>`;
+        title="${esc(p.idle ? `Idle: the firmware's own Idle mode, the hash boards stop (no hashing). Any other preset wakes it.${on ? " — on the miner now" : ""}` : `${p.label}: ${pText(p)}${p.tuned ? " (tuned)" : " (hand-set)"}${on ? " — on the miner now" : ""}`)}">${p.idle ? '<span aria-label="Idle">☾</span>' : esc(SHORT[k] || p.label)}</button>`;
     }).join("");
     return `<div class="scl-prow"><span class="muted">Preset</span><div class="scl-pbtns">${btns}</div></div>`;
   };
@@ -545,14 +547,14 @@
     if (h.restart && h.restart.state === "restarting") return `<span class="pill warn" title="${esc(h.restart.msg || "")}">restarting…</span>`;
     const p = (h.presets || {})[h.active];
     if (p && p.idle) return `<span class="pill" style="color:var(--text);border-color:var(--text);border-style:dashed" title="The firmware's own Idle mode: not hashing. Any other preset wakes it.">Idle</span>`;
-    if (p) return `<span class="pill" style="color:var(--text);border-color:var(--text)" title="${esc(`${p.label}: ${p.mhz} MHz · ${p.mv} mV · PV ${p.pv}${p.tuned ? " (tuned)" : " (hand-set)"}`)}">${esc(p.label)}</span>`;
+    if (p) return `<span class="pill" style="color:var(--text);border-color:var(--text)" title="${esc(`${p.label}: ${pText(p)}${p.tuned ? " (tuned)" : " (hand-set)"}`)}">${esc(p.label)}</span>`;
     return `<span class="pill" title="Not on one of its presets (its own or a hand-set clock)">no preset</span>`;
   };
   document.addEventListener("click", async (e) => {
     const b = e.target.closest && e.target.closest(".scl-pbtn"); if (!b) return;
     const id = b.dataset.id, key = b.dataset.preset, p = ((HW[id] || {}).presets || {})[key]; if (!p) return;
     if (!confirm(p.idle ? `Put ${nameOf(id)} in Idle?\n\nIt stops hashing (the firmware's own Idle mode) until you pick another preset, or its schedule does.`
-                        : `Put ${p.label} on ${nameOf(id)}?\n${p.mhz} MHz · ${p.mv} mV · PV ${p.pv} and its fan curve`)) return;
+                        : (p.box ? `Put ${p.label} on ${nameOf(id)}?\n${p.mhz} MHz: the clock only (voltage and fans stay as they are)` : `Put ${p.label} on ${nameOf(id)}?\n${pText(p)} and its fan curve`))) return;
     b.disabled = true; b.blur();
     try { await api("POST", "/api/presets/apply", { miner_id: id, key }); toast(p.idle ? `${nameOf(id)} is going idle` : `${p.label} is on ${nameOf(id)}`); }
     catch (err) { toast(err.message, true); }
@@ -740,6 +742,69 @@
     }
   }
 
+  // SC Box / HS Box clock (since 1.17): the one plan setting the app writes on these boxes. The voltage and fan
+  // fields stay as the miner has them (0.01 V made no measurable difference in power in testing, and their
+  // firmware ignores fan numbers). Locked like the SC Lite's clock while a preset / schedule is in charge.
+  const BC = {};            // id -> the last live read {running, stock, manual, limits}
+  const BC_ASKED = {};
+  function boxClockBox(pan, id, hwd, note) {
+    let box = pan.querySelector(".scl-bc");
+    const h = HW[id] || {}, lim = h.box;
+    if (!lim || String(id).startsWith("demo-")) { if (box) box.remove(); return; }
+    if (note) note.textContent = "On this model the app sets the clock only: the voltage and fan fields stay as the miner has them. The SC Lite clock / voltage / PV fields here don't apply.";
+    if (!box || box.dataset.id !== id) {
+      if (box) box.remove();
+      box = document.createElement("div");
+      box.className = "scl-bc"; box.dataset.id = id;
+      box.style.cssText = "margin:.25rem 0 .9rem;padding:.65rem .8rem;border:1px solid var(--border);border-radius:8px";
+      (note || pan.querySelector("h2") || pan.firstChild).after(box);
+    }
+    const live = BC[id] || {}, run = (live.running && live.running.mhz) || lim.running;
+    const volts = (live.running && live.running.volts) || lim.volts;
+    const held = (h.in_charge || []).length ? h.in_charge : null, busy = !!h.tuning;
+    const opts = [];
+    for (let c = lim.hi; c >= lim.lo; c -= lim.grid) {
+      const tag = c === lim.stock ? " (stock)" : "", now = c === run ? " (now)" : "";
+      opts.push(`<option value="${c}"${c === run ? " selected" : ""}>${c} MHz${tag}${now}</option>`);
+    }
+    if (run && (run > lim.hi || run < lim.lo || run % lim.grid)) opts.unshift(`<option value="" selected disabled>${run} MHz (now, outside what the app sets)</option>`);
+    const sig = [lim.lo, lim.hi, run, volts, live.manual ?? lim.manual, held ? held.join() : "", busy].join("|");
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    box.innerHTML = `<div><b>Clock</b> <span class="muted">· SC Box / HS Box</span></div>
+      <p class="muted" style="font-size:.85rem;margin:.3rem 0 .5rem">Runs <b>${run ? esc(run) + " MHz" : "?"}</b>${volts ? ` at ${esc(volts)} V` : ""}
+        <span class="muted">(${(live.manual ?? lim.manual) ? "manual setting" : "stock plan"})</span>. Stock is ${esc(lim.stock)} MHz.
+        The app sets ${esc(lim.lo)}–${esc(lim.hi)} MHz in ${esc(lim.grid)} MHz steps: lower clocks use less power and hash less
+        (about 7 W per 25 MHz on the SC Box, 4–5 W on the HS Box in testing, at the same J/TH). Both boxes made errors 25 MHz above
+        what they ran, so the app never sets more than stock; the Tuner finds the fastest clean clock.</p>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <select class="scl-bc-sel" aria-label="Clock"${held || busy ? " disabled" : ""}>${opts.join("")}</select>
+        <button type="button" class="scl-bc-go"${held || busy ? " disabled" : ""}>Set clock</button></div>
+      <p class="muted" style="font-size:.8rem;margin:.5rem 0 0">${busy ? "<b>Locked while tuning.</b> " : held ? `<b>Locked:</b> run by ${esc(held.join(" and "))}. Take manual control (above) or apply another preset. ` : ""}
+        Only the clock changes and applies at once, without a restart.
+        ${hwd.profile === "hs-box" ? "" : "The SC Box's fans run near full speed for about 15 minutes after any settings change."}</p>`;
+    const go = box.querySelector(".scl-bc-go");
+    if (go) go.onclick = async () => {
+      const want = Number(box.querySelector(".scl-bc-sel").value);
+      if (!want) return;
+      if (want === run) { toast(`It already runs ${run} MHz`); return; }
+      if (!confirm(`Set ${nameOf(id)}'s clock from ${run || "?"} MHz to ${want} MHz?\n\nOnly the clock changes; voltage and fans stay as they are.`)) return;
+      go.disabled = true; go.textContent = "Setting…";
+      try {
+        const r = await api("POST", "/api/hardware/box_clock", { miner_id: id, mhz: want });
+        BC[id] = Object.assign({}, BC[id], { running: Object.assign({}, (BC[id] || {}).running, { mhz: r.mhz, volts }), manual: true });
+        toast(`${r.mhz} MHz: the miner kept it`);
+      } catch (e) { toast(e.message, true); }
+      go.disabled = false; go.textContent = "Set clock";
+      loadHw();
+    };
+    if (!BC_ASKED[id] || Date.now() - BC_ASKED[id] > 60000) {
+      BC_ASKED[id] = Date.now();
+      api("GET", `/api/hardware/box_clock?miner=${encodeURIComponent(id)}`)
+        .then(r => { BC[id] = r; delete box.dataset.sig; updateDetailInfo(); }).catch(() => {});
+    }
+  }
+
   function updateDetailInfo() {
     const el = $("sclDetailInfo"), id = detailId();
     if (!el || !id) return;
@@ -755,7 +820,8 @@
       if (rr) bits.push(`<span title="What the miner is running: its own setting (manual) or its stock plan">Runs <b>${pl2(rr)}</b> <span class="muted">(${hwd.manual ? "manual setting" : "stock plan"})</span></span>`);
       const ftb = hwd.plan_format === "box" && hwd.fan_target;
       if (ftb) bits.push(`<span title="The firmware's own fan loop speeds the fans up or down to hold the control board at this temperature. Set it in the fan panel below.">Fan target <b>${esc(FT[id] ? FT[id].value : hwd.fan_target.value)} °C</b> <span class="muted">(${esc(hwd.fan_target.min)}–${esc(hwd.fan_target.max)})</span></span>`);
-      bits.push(`<span class="muted" title="This model writes volts as a decimal with no PV. The app reads it but doesn't change clock or voltage on it yet, and its firmware runs its own fan loop${ftb ? " (the app sets that loop's target)" : ""}; chip health, pools and restarts work.">Clock and voltage: read only on this model${ftb ? "; fans follow the fan target" : "; fans too"}</span>`);
+      if (h.box) bits.push(`<span class="muted" title="This model writes volts as a decimal with no PV. The app sets its clock (the Clock box below, presets, schedules and the Tuner) and keeps the voltage as the miner has it; its firmware runs its own fan loop${ftb ? " (the app sets that loop's target)" : ""}.">Clock: set by the app · voltage as the miner has it${ftb ? " · fans follow the fan target" : ""}</span>`);
+      else bits.push(`<span class="muted" title="This model writes volts as a decimal with no PV. The app reads it but doesn't change clock or voltage on it yet, and its firmware runs its own fan loop${ftb ? " (the app sets that loop's target)" : ""}; chip health, pools and restarts work.">Clock and voltage: read only on this model${ftb ? "; fans follow the fan target" : "; fans too"}</span>`);
     }
     // clock / voltage and fan panels: off on a model whose plan format the app can't write yet
     const ro = !!(hwd.plan_format && hwd.plan_format !== "sc-lite");
@@ -773,7 +839,7 @@
       // restart works on every model; the fan target box is the boxes' own control. Leaving a read-only miner
       // puts back each control's own state (the dashboard keeps the clock fields locked until you unlock them)
       pan.querySelectorAll("input, select, button").forEach(x => {
-        if (x.id === "btnDetailRestart" || x.closest(".scl-ft")) return;
+        if (x.id === "btnDetailRestart" || x.closest(".scl-ft") || x.closest(".scl-bc")) return;
         if (ro) { if (!x.dataset.sclRo) x.dataset.sclRo = x.disabled ? "was" : "1"; x.disabled = true; }
         else if (x.dataset.sclRo) { x.disabled = x.dataset.sclRo === "was"; delete x.dataset.sclRo; }
       });
@@ -783,6 +849,16 @@
         const h2 = pan.querySelector("h2"); if (h2) h2.after(n); else pan.prepend(n); }
       if (!ro && n) n.remove();
       if (pid === "detailFanAuto") fanTargetBox(pan, id, hwd, n);
+      if (pid === "planMhz") {
+        boxClockBox(pan, id, hwd, n);
+        // a box: only its own clock control shows; the SC Lite fields (unlock, MHz / mV / PV) are hidden, not just off
+        const bx = !!(HW[id] || {}).box && !String(id).startsWith("demo-");
+        [...pan.children].forEach(c => {
+          const keep = c.tagName === "H2" || c.classList.contains("scl-ro-note") || c.classList.contains("scl-bc") || c.querySelector("#detailPlanRaw") || c.id === "detailPlanRaw" || c.querySelector("h2");
+          if (bx && !keep) { if (!c.dataset.sclBoxHid) { c.dataset.sclBoxHid = c.style.display || "-"; c.style.display = "none"; } }
+          else if (!bx && c.dataset.sclBoxHid) { c.style.display = c.dataset.sclBoxHid === "-" ? "" : c.dataset.sclBoxHid; delete c.dataset.sclBoxHid; }
+        });
+      }
     }
     const m = (S().miners || []).find(x => x.id === id) || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv);
     if (h.active === "idle") bits.push(`<span title="The firmware's own Idle mode: the hash boards are off. Any other preset wakes it.">Idle: <b>not hashing</b></span>`);

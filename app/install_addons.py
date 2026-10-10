@@ -563,10 +563,11 @@ def install() -> None:
         print("server.py: atomic owner-only registry writes, request size cap, no passwords in responses")
 
 
-    if TUNER.exists():
-        print(f"tuner script found: {TUNER}")
-    else:
-        print(f"WARNING: {TUNER} not found. Put asic_tuner.py in the python folder.")
+    for t in (TUNER, TUNER.with_name("asic_tuner_box.py")):
+        if t.exists():
+            print(f"tuner script found: {t}")
+        else:
+            print(f"WARNING: {t} not found. Put {t.name} in the python folder.")
     print("\nDone. Restart the dashboard (Ctrl+C, then python server.py). Sign in with the default login")
     print("(Umbrel) or create one on the first visit; SCLITE_WEBUI_AUTH=off runs without a login.")
 

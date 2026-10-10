@@ -223,6 +223,8 @@ def _read_icinfo() -> tuple[Chips, dict[int, int]]:
         raw = json.loads(raw["body"])
     elif isinstance(raw, str):
         raw = json.loads(raw)
+    if isinstance(raw, dict) and isinstance(raw.get("body"), dict) and "drawdata" not in raw:
+        raw = raw["body"]      # the SC Box / HS Box send it as an object, the SC Lite as text
     if not isinstance(raw, dict) or not isinstance(raw.get("drawdata"), list):
         raise RuntimeError(f"unexpected /dbg/icinfo response: {str(raw)[:300]}")
     chips: Chips = {}
@@ -272,7 +274,7 @@ def current_plan() -> Plan:
     return Plan(mhz, mv, pv)
 
 
-def running_state() -> tuple[Plan, dict, str]:
+def running_state() -> tuple[Plan, dict, str, bool]:
     """What the miner really runs before a run: (plan, the raw fields to put back, a description).
     manual on: manualPowerplan. manual off: the selected firmware level (its stock plan, or its Idle mode),
     and manualPowerplan may hold an old setting that isn't running at all, so putting the miner "back" on
@@ -281,7 +283,7 @@ def running_state() -> tuple[Plan, dict, str]:
     raw = {k: s.get(k) for k in ("manual", "select", "manualPowerplan")}
     if s.get("manual"):
         mhz, mv, _a, _b, pv = sc.parse_plan(str(s.get("manualPowerplan")))
-        return Plan(mhz, mv, pv), raw, "its own manual setting"
+        return Plan(mhz, mv, pv), raw, "its own manual setting", True
     try:
         sel = int(s.get("select") or 0)
     except (TypeError, ValueError):
@@ -292,11 +294,11 @@ def running_state() -> tuple[Plan, dict, str]:
         info = str(plans[sel].get("info") or "")
     try:
         mhz, mv, _a, _b, pv = sc.parse_plan(info)
-        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan"
+        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan", mhz > 0
     except Exception:
         # its Idle mode ("0 MHz 0 V ..."): no clock to tune from; the manual plan stands in for the baseline
         mhz, mv, _a, _b, pv = sc.parse_plan(str(s.get("manualPowerplan")))
-        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan ({info or 'unknown'})"
+        return Plan(mhz, mv, pv), raw, f"the firmware's level {sel} plan ({info or 'unknown'})", False
 
 
 def restore_raw(raw: dict) -> None:
@@ -1124,7 +1126,7 @@ def main() -> None:
             sys.exit(2)
         log("WARNING: untested model; watch the first steps closely")
 
-    cur, pre_raw, pre_how = running_state()
+    cur, pre_raw, pre_how, pre_live = running_state()
     pre = cur   # what the miner ran before this run: where it goes back to unless a setting is confirmed
     log(f"before the run the miner is on {pre.text()} ({pre_how})")
     # PV follows mV with a fixed gap: the miner's own gap unless --pv-offset sets one
@@ -1462,7 +1464,12 @@ def main() -> None:
             log(f"going back to what the miner ran before the run: {left if raw_back else pre.text()}")
         try:
             if raw_back:
-                restore_raw(pre_raw)     # put exactly that back (manual off, its level selected)
+                # Turning manual off doesn't make the firmware run its level again (seen on the HS Box: it kept
+                # the last clock written), so first write the level's own plan, which takes effect at once,
+                # then put the fields back (manual off, its level selected). Idle is picked by `select` alone.
+                if pre_live:
+                    apply_plan(pre)
+                restore_raw(pre_raw)
             else:
                 apply_plan(final)
             # leave the fan where the setting needed it until the dashboard's auto fan takes over again; not

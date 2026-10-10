@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.16.2
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.17.0
 category: developer
-version: "1.16.2"
+version: "1.17.0"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -29,7 +29,9 @@ description: >-
   each one runs cleanly, by watching every chip's hardware errors against that chip's own normal
   rate while holding the boards at a temperature you choose. It confirms the winner and builds and
   tests the four presets, each with its own fan curve, and can rebuild the presets later (for
-  example at another temperature) without a new search. Several miners can tune at once.
+  example at another temperature) without a new search. Several miners can tune at once. On the
+  SC Box and HS Box the app sets the clock only (presets, a clock control and a clock tuner) and
+  their Miner page sets the firmware's fan target.
 
 
   Notifications go to Telegram or Discord: a miner offline, hot, low hashrate, restarted on its
@@ -46,14 +48,33 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.16.2
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.16.2
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.16.2
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.16.2
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.16.2
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.16.2
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.17.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.17.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.17.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.17.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.17.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.17.0
 releaseNotes: |-
-  **What's new in 1.16.2**
+  **What's new in 1.17.0**
+
+  - **Clock control for the SC Box and HS Box.** Their Miner page has a clock box, Profiles makes four
+    clock presets from the clock the box runs now (High, then 25, 50 and 75 MHz lower), and schedules can
+    use them. Only the clock changes: in testing a lower voltage made no measurable difference in power,
+    so the voltage and fans stay as the miner has them. Nothing is set above stock.
+  - **A clock tuner for the SC Box and HS Box** (Tuner page): it learns every chip's normal error rate,
+    steps the clock up 25 MHz at a time until a step isn't clean, confirms the fastest clean clock, then
+    builds and tests the four presets. Stopping it puts back exactly what the miner ran before. These
+    are the first runs on these models: watch the first steps.
+  - The chip list on the SC Box and HS Box now reads their chip data.
+
+  **1.16.3**
+
+  - **Safer "go back" for miners on their stock plan.** Tester data from an HS Box showed that turning
+    the miner's manual setting off doesn't make it run its stock plan again: it keeps the last clock
+    written. The tuner and the schedule now write the stock plan's clock and voltage first (which takes
+    effect at once) and then switch back to the stock plan, so the miner really runs what it ran before.
+
+  **1.16.2**
 
   - **Graph times on the hour, in 24-hour time:** the hashrate graphs mark full hours (00:00, 06:00,
     12:00, 18:00 on the Miner page; every 12 hours on a card) where they fall, with the day at midnight
