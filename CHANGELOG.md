@@ -3,11 +3,6 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
-To release a version: put the number in `app/Dockerfile` (`B2AC_VERSION` and the version label), `blake2b-asic-control/docker-compose.yml`
-and `blake2b-asic-control/umbrel-app.yml` (version, the `?v=` on the image links, and a release note),
-add it here, commit, push, then push a `v<version>` tag: GitHub Actions builds and publishes the image
-(see the README).
-
 ## 1.17.0 (2026-10-10)
 
 **Clock control, clock presets and a clock tuner for the SC Box and HS Box.** Built on crProductGuy's clock and

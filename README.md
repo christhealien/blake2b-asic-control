@@ -124,16 +124,134 @@ real unit.
 
 ## Install
 
-**On Umbrel:** App Store → ⋯ (top right) → **Community App Stores** → add
-`https://github.com/christhealien/blake2b-asic-control` → open **christhealien Store** → install
-**Blake2b ASIC Control**. Sign in with the username and password Umbrel shows for the app, then:
+Pick one way. Each keeps its own data (your miners, their passwords, presets, schedules, tuner results):
+back it up like any other private file. After installing:
 
 1. **Settings → Time zone:** pick yours (schedules and restarts run on it; it starts on UTC).
 2. **Settings → Add miner:** its IP and admin password. It's probed by itself within a minute.
-3. To tune an SC Lite: the **Tuner** tab. Read the disclaimer on the sign-in page first.
+3. To tune a miner: the **Tuner** tab. Read the disclaimer on the sign-in page first.
 
-**Without Umbrel** (Docker, or Python on Linux / macOS / Windows): see [TESTING.md](TESTING.md).
 **Demo miners** (Settings → Demo miners) let you look around without touching a real one.
+
+### Umbrel
+
+App Store → ⋯ (top right) → **Community App Stores** → add
+`https://github.com/christhealien/blake2b-asic-control` → open **christhealien Store** → install
+**Blake2b ASIC Control**. Sign in with the username and password Umbrel shows for the app. Updates appear in
+the App Store like any other app.
+
+### StartOS
+
+Download the `.s9pk` for your server (x86_64 or aarch64) from the
+[StartOS package's Releases](https://github.com/christhealien/blake2b-asic-control-startos/releases) and
+**sideload** it in StartOS. After installing, run the **Set Login Password** task StartOS shows and sign in with
+the username and password it gives you. The [package README](https://github.com/christhealien/blake2b-asic-control-startos)
+has the details.
+
+### Docker (Linux, macOS, Windows, a NAS)
+
+The same image Umbrel runs, for amd64 and arm64, from `ghcr.io/christhealien/blake2b-asic-control`
+(`latest`, or a version such as `1.17.0`). On Linux, run as your own user so the data folder stays yours:
+
+```sh
+mkdir -p ~/blake2b/data && cd ~/blake2b
+docker run -d --name blake2b --restart unless-stopped --stop-timeout 120 \
+  -p 127.0.0.1:8787:8787 -v "$PWD/data:/data" --user "$(id -u):$(id -g)" \
+  -e SCLITE_WEBUI_DEFAULT_USER=admin -e SCLITE_WEBUI_DEFAULT_PASSWORD='pick-a-long-password' \
+  -e TZ=Europe/Berlin \
+  ghcr.io/christhealien/blake2b-asic-control:latest
+```
+
+Open http://localhost:8787 and sign in with that login (change it under Settings → Account).
+
+- **Other devices on your network:** use `-p 8787:8787` instead. Keep the default login set as above:
+  without one, the first person to open the page creates the login.
+- **Stop timeout 120 s:** a stop gives running tuning runs time to put each miner's setting back.
+- **Update:**
+  ```sh
+  docker pull ghcr.io/christhealien/blake2b-asic-control:latest
+  docker rm -f blake2b
+  ```
+  Then run the same `docker run` again; the `data` folder keeps everything.
+- **Windows / macOS (Docker Desktop):** the same command works without the `--user` part.
+
+**Docker Compose:** save this as `docker-compose.yml` in `~/blake2b` and run `docker compose up -d`. Update with
+`docker compose pull && docker compose up -d`.
+
+```yaml
+services:
+  blake2b:
+    image: ghcr.io/christhealien/blake2b-asic-control:latest
+    container_name: blake2b
+    restart: unless-stopped
+    stop_grace_period: 120s
+    user: "1000:1000"          # your user and group id (id -u, id -g)
+    ports:
+      - "127.0.0.1:8787:8787"  # "8787:8787" to open it from other devices
+    volumes:
+      - ./data:/data
+    environment:
+      SCLITE_WEBUI_DEFAULT_USER: admin
+      SCLITE_WEBUI_DEFAULT_PASSWORD: pick-a-long-password
+      TZ: Europe/Berlin
+```
+
+Don't set `SCLITE_BEHIND_PROXY` unless a reverse proxy sits in front: without one, the login back-off has to
+go by the real connection's address.
+
+### Linux or macOS without Docker
+
+Needs **git** and **Python 3.10 or newer** (on Debian / Ubuntu / Raspberry Pi OS:
+`sudo apt install git python3 python3-venv`).
+
+```sh
+git clone https://github.com/christhealien/blake2b-asic-control.git
+cd blake2b-asic-control/app
+sh run-local.sh                  # this computer only: http://127.0.0.1:8787
+HOST=0.0.0.0 sh run-local.sh     # or: from other devices too, http://<this computer's IP>:8787
+```
+
+The first run downloads the dashboard this builds on and sets everything up in `app/local` (a minute or two);
+later runs start straight away. Ctrl+C stops it. On the first visit you create the login, so do that straight
+away when it's open to your network. To update: `git pull`, then start it again.
+
+**Start it at boot (Linux, systemd):** save this as `/etc/systemd/system/blake2b.service`. Put your user
+name in `User=` and your clone's `app` folder in both paths. Then run
+`sudo systemctl daemon-reload && sudo systemctl enable --now blake2b`.
+
+```ini
+[Unit]
+Description=Blake2b ASIC Control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=youruser
+WorkingDirectory=/home/youruser/blake2b-asic-control/app
+Environment=HOST=0.0.0.0
+ExecStart=/bin/sh run-local.sh
+Restart=on-failure
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Windows without Docker
+
+Install [git](https://git-scm.com/download/win) and [Python 3.10+](https://www.python.org/downloads/) (tick
+"Add python.exe to PATH"), then in PowerShell:
+
+```powershell
+git clone https://github.com/christhealien/blake2b-asic-control.git
+cd blake2b-asic-control\app
+powershell -ExecutionPolicy Bypass -File run-local.ps1                   # this computer only
+powershell -ExecutionPolicy Bypass -File run-local.ps1 -Listen 0.0.0.0   # or: other devices too
+```
+
+Open http://127.0.0.1:8787; Ctrl+C in the window stops it. To update: `git pull`, then start it again.
+
+More on running it outside Umbrel (and what to report when testing): [TESTING.md](TESTING.md).
 
 > **⚠ Overclocking and voltage changes can damage hardware and void warranties.** The tuner and presets
 > change clock, voltage and fans on real miners. Every value is checked against each miner's limits and
@@ -219,20 +337,6 @@ Umbrel only reads `*/umbrel-app.yml` in a store repo, so `app/` is ignored by it
 | `theme.css` / `theme.js` | The monochrome look with Light / Dark |
 | `widget_server.py` | The Umbrel home-screen widgets (internal port 8788) |
 | `run-local.sh` / `run-local.ps1` | Run it without Docker (see TESTING.md) |
-
-## Releasing a new version
-
-1. Put the new number in `blake2b-asic-control/docker-compose.yml` (`image:`),
-   `blake2b-asic-control/umbrel-app.yml` (`version:`, the `?v=` on the icon and gallery URLs, and the
-   release notes) and `app/Dockerfile` (the version label), and add it to `CHANGELOG.md`.
-2. Commit and push, then tag it: `git tag v1.14.1 && git push origin v1.14.1`.
-3. The **image** workflow builds the image and pushes `ghcr.io/christhealien/blake2b-asic-control:<version>`
-   (GitHub → Actions shows it; about 10–15 minutes for both architectures).
-4. Umbrel checks stores every few minutes and offers the update once the new manifest is there.
-
-The store's "What's new" (`releaseNotes`) is markdown, and a community store app shows only one entry,
-so it keeps a rolling list: the new version on top, earlier ones as one-line bullets, and a link to
-CHANGELOG.md for everything.
 
 ## Credits
 
