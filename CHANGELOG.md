@@ -3,6 +3,27 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.19.0 (2026-10-14)
+
+- **A new Pools page** (`addon.js`, `buildPools` / `renderPools`). The dashboard's batch forms are kept in the page (its
+  script uses them) but hidden. They acted on miners ticked on the Fleet page without showing which, and needed
+  addresses typed into text fields. The new page works in four steps:
+  1. **Pick the miners:** every miner with a tick box (the same ticks as on Fleet, both ways), the pool it mines on,
+     its worker name and how many pools it has, with All / None and a "2 of 4 ticked" count.
+  2. **Their pools:** each ticked miner's pools in order. The one it mines on is marked; the others show ready or
+     down, with accepted / rejected counts. Each has **Switch to it** (made the first pool, then the miner restarts
+     with the progress bar) and **Remove** (asks first, and warns when it's the pool in use; a miner's only pool
+     can't be removed).
+  3. **Add a pool** to the ticked miners: pool address, payout address, password, and either each miner's own worker
+     name or one you give. Optionally make it the first pool and switch to it now (the miners restart). The button
+     says how many miners it goes to.
+  4. **One pool on all the ticked miners:** a list of the pools they have ("on 2 of 3"), to switch them all to it or
+     remove it from all of them.
+  - Every action confirms with the miners' names first, and reports per miner what worked and what didn't.
+  - On a phone each row wraps instead of squeezing a table.
+  - The pool-order field ("1,0"), the address fields for remove / promote, and the batch temperature-control switch
+    are gone. Each miner's own temperature control stays on its Miner page.
+
 ## 1.18.2 (2026-10-14)
 
 - **Rejected-shares strip matches the hashrate graph** (`addon.js`, `rejectStrip`).

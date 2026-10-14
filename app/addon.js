@@ -1544,7 +1544,199 @@
   window.addEventListener("resize", () => { clearTimeout(steadyCards._r); steadyCards._r = setTimeout(steadyCards, 150); });
 
   // ------------------------------------------------------------ start
-  buildQuickBar(); buildDetail(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildScale(); buildRef();
+  // ------------------------------------------------------------ Pools page (since 1.19)
+  // One page that says which miners it acts on: tick them in the list (the same ticks as on Fleet), see every
+  // pool each one has (the one it mines on marked), switch or remove a pool per miner, add a pool to all ticked
+  // miners, or switch / remove one pool on all of them. The dashboard's own controls stay in the page, hidden.
+  const shortAddr = (a) => { a = String(a || ""); return a.length > 16 ? `${a.slice(0, 8)}…${a.slice(-5)}` : a; };
+  const userBits = (u) => { u = String(u || ""); const i = u.indexOf("."); return i < 0 ? { addr: u, worker: "" } : { addr: u.slice(0, i), worker: u.slice(i + 1) }; };
+  const poolMiners = () => (S().miners || []).filter(m => !String(m.id).startsWith("demo-"));
+  const poolSel = () => { const sel = S().selected || new Set(); return poolMiners().filter(m => sel.has(m.id)); };
+  function setTick(id, on) {
+    const sel = S().selected; if (!sel) return;
+    if (on) sel.add(id); else sel.delete(id);
+    if (window.sclRender) try { window.sclRender(); } catch (e) { /* ignore */ }
+    renderPools();
+  }
+  function buildPools() {
+    const view = $("viewBatch"); if (!view || $("sclPools")) return;
+    [...view.children].forEach(c => { c.hidden = true; });       // the dashboard's own forms: kept (its script uses them), not shown
+    const box = document.createElement("div"); box.id = "sclPools";
+    box.innerHTML = `
+      <div class="panel compact">
+        <div class="row" style="justify-content:space-between;gap:.5rem;flex-wrap:wrap"><h2 style="margin:0">1 · Pick the miners</h2>
+          <div class="row" style="gap:.4rem"><span id="sclPlCount" class="pill">none ticked</span>
+            <button type="button" id="sclPlAll">All</button><button type="button" id="sclPlNone">None</button></div></div>
+        <p class="muted" style="font-size:.85rem;margin:.4rem 0 .6rem">Everything below acts only on the miners ticked here (the same ticks as on the Fleet page).</p>
+        <div id="sclPlMiners"></div>
+      </div>
+      <div class="panel compact">
+        <h2 style="margin:0 0 .5rem">2 · Their pools</h2>
+        <div id="sclPlLists" class="muted">Tick a miner above to see its pools.</div>
+      </div>
+      <div class="panel compact">
+        <h2 style="margin:0 0 .3rem">3 · Add a pool to <span id="sclPlAddN">the ticked miners</span></h2>
+        <p class="muted" style="font-size:.85rem;margin:0 0 .6rem">The miner's login for the pool is <i>payout address</i>.<i>worker</i>. With "keep each miner's worker name", every miner keeps the worker name it already uses, so you can tell them apart at the pool.</p>
+        <div class="scl-pl-form">
+          <label>Pool address<input id="sclPlUrl" placeholder="host:port or stratum+tcp://host:port" autocomplete="off" /></label>
+          <label>Payout address<input id="sclPlPayout" placeholder="your wallet address" autocomplete="off" /></label>
+          <label>Password<input id="sclPlPass" value="x" autocomplete="off" /></label>
+        </div>
+        <div class="row" style="gap:1rem;flex-wrap:wrap;margin:.5rem 0">
+          <label class="check"><input type="radio" name="sclPlW" value="keep" checked /> keep each miner's worker name</label>
+          <label class="check"><input type="radio" name="sclPlW" value="set" /> use this worker name: <input id="sclPlWorker" style="width:9rem" autocomplete="off" /></label>
+        </div>
+        <label class="check"><input type="checkbox" id="sclPlFirst" /> make it the first pool and switch to it now (the miners restart; hashing pauses about a minute)</label>
+        <div class="row" style="margin-top:.6rem"><button type="button" class="primary" id="sclPlAdd">Add pool</button><span class="muted" id="sclPlAddNote" style="font-size:.85rem"></span></div>
+      </div>
+      <div class="panel compact">
+        <h2 style="margin:0 0 .3rem">4 · One pool on all the ticked miners</h2>
+        <p class="muted" style="font-size:.85rem;margin:0 0 .6rem">Pick a pool the ticked miners have, then switch them all to it (it becomes their first pool and they restart) or remove it from all of them.</p>
+        <div class="row" style="gap:.5rem;flex-wrap:wrap"><select id="sclPlBulk" style="min-width:16rem;max-width:100%"></select>
+          <button type="button" id="sclPlBulkFirst">Switch to it</button><button type="button" class="danger" id="sclPlBulkDel">Remove it</button></div>
+      </div>`;
+    view.appendChild(box);
+    $("sclPlAll").onclick = () => { poolMiners().forEach(m => S().selected.add(m.id)); if (window.sclRender) window.sclRender(); renderPools(); };
+    $("sclPlNone").onclick = () => { poolMiners().forEach(m => S().selected.delete(m.id)); if (window.sclRender) window.sclRender(); renderPools(); };
+    box.addEventListener("change", (e) => { const c = e.target.closest("[data-pltick]"); if (c) setTick(c.dataset.pltick, c.checked); });
+    box.addEventListener("click", plClick);
+    $("sclPlAdd").onclick = plAdd;
+    $("sclPlBulkFirst").onclick = () => plBulk("first");
+    $("sclPlBulkDel").onclick = () => plBulk("del");
+    const st = document.createElement("style");
+    st.textContent = `#sclPools .scl-pl-tab td, #sclPools .scl-pl-tab th { padding: .35rem .5rem; vertical-align: middle }
+      #sclPools .scl-pl-tab tr.on td { background: color-mix(in srgb, var(--text) 6%, transparent) }
+      #sclPools .scl-pl-m { border: 1px solid var(--line); border-radius: 10px; padding: .55rem .7rem; margin: 0 0 .6rem }
+      #sclPools .scl-pl-m h3 { margin: 0 0 .35rem; font-size: .95rem }
+      #sclPools .scl-pl-row { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .7rem; padding: .45rem .5rem;
+        border-top: 1px solid var(--line); cursor: pointer }
+      #sclPools .scl-pl-row:first-child { border-top: 0 }
+      #sclPools .scl-pl-row.on { background: color-mix(in srgb, var(--text) 6%, transparent); border-radius: 8px }
+      #sclPools .scl-pl-row .mono { font-size: .78rem }
+      #sclPools .scl-pl-who { min-width: 11rem }
+      #sclPools .scl-pl-what { font-size: .82rem; flex: 1 1 16rem }
+      #sclPools .scl-pl-p { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; padding: .4rem 0; border-top: 1px solid var(--line) }
+      #sclPools .scl-pl-p:first-of-type { border-top: 0 }
+      #sclPools .scl-pl-pl { flex: 1 1 16rem; min-width: 0 }
+      #sclPools .scl-pl-host { word-break: break-all }
+      #sclPools .scl-pl-pb { display: flex; gap: .35rem; margin-left: auto }
+      #sclPools .scl-pl-m button { font-size: .8rem; padding: .25rem .55rem }
+      #sclPools .mono { font-family: var(--mono) }
+      #sclPools .scl-pl-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem }
+      #sclPools .scl-pl-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .8rem; color: var(--muted) }
+      #sclPools .scl-pl-form input { width: 100%; box-sizing: border-box }`;
+    document.head.appendChild(st);
+  }
+  function renderPools() {
+    const box = $("sclPools"); if (!box || $("viewBatch").classList.contains("hidden")) return;
+    const all = poolMiners(), sel = poolSel(), selIds = new Set(sel.map(m => m.id));
+    $("sclPlCount").textContent = sel.length ? `${sel.length} of ${all.length} ticked` : "none ticked";
+    $("sclPlCount").className = "pill" + (sel.length ? " ok" : "");
+    const rows = all.map(m => {
+      const sn = m.snapshot || {}, wp = sn.working_pool || {}, pools = sn.pools || [], u = userBits(wp.user || (pools[0] || {}).user);
+      const on = selIds.has(m.id), busy = (HW[m.id] || {}).tuning;
+      return `<label class="scl-pl-row${on ? " on" : ""}"><input type="checkbox" data-pltick="${esc(m.id)}" ${on ? "checked" : ""} />
+        <span class="scl-pl-who"><b>${esc(m.name)}</b> <span class="muted mono">${esc(m.ip)}</span>${busy ? ' <span class="pill warn">tuning</span>' : ""}</span>
+        <span class="scl-pl-what muted">${wp.url ? `mining on <span class="mono" style="color:var(--text)">${esc(hostOf(wp.url))}</span> (P${esc(wp.id)})` : sn.ok === false ? "offline" : "not mining"}${u.worker ? ` · worker <span class="mono" style="color:var(--text)">${esc(u.worker)}</span>` : ""} · ${pools.length} pool${pools.length === 1 ? "" : "s"}</span></label>`;
+    }).join("") || `<p class="muted">No miners yet: add them under Settings.</p>`;
+    if ($("sclPlMiners")._last !== rows) { $("sclPlMiners").innerHTML = rows; $("sclPlMiners")._last = rows; }
+    // each ticked miner's pools
+    const lists = sel.length ? sel.map(m => {
+      const sn = m.snapshot || {}, wp = sn.working_pool || {}, pools = sn.pools || [], busy = (HW[m.id] || {}).tuning;
+      const body = pools.map(p => {
+        const mining = String(p.id) === String(wp.id), u = userBits(p.user);
+        return `<div class="scl-pl-p"><div class="scl-pl-pl"><div><span class="muted mono">P${esc(p.id)}</span> <span class="mono scl-pl-host">${esc(hostOf(p.url))}</span>
+            ${mining ? '<span class="pill ok">mining</span>' : p.status === "Alive" ? '<span class="muted">ready</span>' : `<span style="color:var(--warn)">${esc(String(p.status || "down").toLowerCase())}</span>`}</div>
+          <div class="muted" style="font-size:.78rem"><span class="mono" title="${esc(p.user || "")}">${esc(shortAddr(u.addr))}${u.worker ? `.<b style="color:var(--text)">${esc(u.worker)}</b>` : ""}</span>${p.accepted != null ? ` · ${(+p.accepted).toLocaleString()} accepted` : ""}${p.rejected ? ` · ${(+p.rejected).toLocaleString()} rejected` : ""}</div></div>
+          <div class="scl-pl-pb">${mining ? "" : `<button type="button" data-plfirst="${esc(m.id)}" data-url="${esc(p.url)}" ${busy ? "disabled" : ""} title="Make this the first pool and restart the miner, so it mines here">Switch to it</button>`}
+            <button type="button" class="danger" data-pldel="${esc(m.id)}" data-url="${esc(p.url)}" data-mining="${mining ? 1 : ""}" ${pools.length < 2 ? "disabled title='Its only pool'" : ""}>Remove</button></div></div>`;
+      }).join("");
+      return `<div class="scl-pl-m"><h3>${esc(m.name)} <span class="muted mono" style="font-size:.75rem;font-weight:400">${esc(m.ip)}</span></h3>${pools.length
+        ? body
+        : `<span class="muted">${sn.ok === false ? "Offline: its pools can't be read." : "No pools reported yet."}</span>`}</div>`;
+    }).join("") : "Tick a miner above to see its pools.";
+    if ($("sclPlLists")._last !== lists) { $("sclPlLists").innerHTML = lists; $("sclPlLists")._last = lists; $("sclPlLists").className = sel.length ? "" : "muted"; }
+    const n = sel.length;
+    $("sclPlAddN").textContent = n ? `the ${n} ticked miner${n > 1 ? "s" : ""}` : "the ticked miners";
+    $("sclPlAdd").textContent = n ? `Add to ${n} miner${n > 1 ? "s" : ""}` : "Add pool";
+    $("sclPlAdd").disabled = !n;
+    // pools the ticked miners have (by address), for section 4
+    const seen = new Map();
+    sel.forEach(m => ((m.snapshot || {}).pools || []).forEach(p => {
+      const k = String(p.url || ""); if (!k) return;
+      const e = seen.get(k) || { url: k, ids: [] }; if (!e.ids.includes(m.id)) e.ids.push(m.id); seen.set(k, e);
+    }));
+    const bs = $("sclPlBulk"), keep = bs.value;
+    const opts = [...seen.values()].sort((a, b) => b.ids.length - a.ids.length).map(e =>
+      `<option value="${esc(e.url)}">${esc(hostOf(e.url))} · on ${e.ids.length} of ${n}</option>`).join("");
+    const html = opts || `<option value="">${n ? "the ticked miners report no pools" : "tick miners first"}</option>`;
+    if (bs._last !== html && document.activeElement !== bs) { bs.innerHTML = html; bs._last = html; if ([...bs.options].some(o => o.value === keep)) bs.value = keep; }
+    ["sclPlBulkFirst", "sclPlBulkDel"].forEach(i => $(i).disabled = !opts);
+  }
+  function outcome(j, what) {
+    const res = (j && j.results) || {}, bad = Object.entries(res).filter(([, r]) => !r || r.ok === false);
+    const good = Object.keys(res).length - bad.length;
+    if (bad.length) toast(`${what}: ${good} ok, failed on ${bad.map(([id, r]) => `${nameOf(id)} (${(r && r.error || "error").slice(0, 80)})`).join("; ")}`, true);
+    else toast(`${what}: done on ${good} miner${good === 1 ? "" : "s"}`);
+    return Object.keys(res).filter(id => !bad.some(([b]) => b === id));
+  }
+  async function plClick(e) {
+    const f = e.target.closest("[data-plfirst]"), d = e.target.closest("[data-pldel]");
+    if (f) {
+      const id = f.dataset.plfirst, url = f.dataset.url;
+      if (!confirm(`Switch ${nameOf(id)} to ${hostOf(url)}?\n\nIt becomes the miner's first pool and the miner restarts (hashing pauses for about a minute).`)) return;
+      f.disabled = true;
+      try { await api("POST", `/api/miners/${encodeURIComponent(id)}/action/make_preferred`, { url, soft_restart: false }); await restartIds([id]); }
+      catch (err) { toast(err.message, true); f.disabled = false; }
+    } else if (d) {
+      const id = d.dataset.pldel, url = d.dataset.url;
+      if (!confirm(`Remove ${hostOf(url)} from ${nameOf(id)}?` + (d.dataset.mining ? "\n\nIt's mining on this pool now: it moves to its next pool." : ""))) return;
+      d.disabled = true;
+      try { await api("POST", `/api/miners/${encodeURIComponent(id)}/action/del_pool`, { url }); toast(`Removed from ${nameOf(id)}`); }
+      catch (err) { toast(err.message, true); d.disabled = false; }
+    } else return;
+    if (window.sclRefresh) await window.sclRefresh();
+    renderPools();
+  }
+  async function plAdd() {
+    const ids = poolSel().map(m => m.id);
+    const url = $("sclPlUrl").value.trim(), payout = $("sclPlPayout").value.trim();
+    const keep = (document.querySelector("input[name=sclPlW]:checked") || {}).value !== "set", worker = $("sclPlWorker").value.trim();
+    if (!ids.length) return toast("Tick at least one miner in section 1", true);
+    if (!url || !payout) return toast("Give the pool address and the payout address", true);
+    if (!keep && !worker) return toast("Give the worker name, or pick \"keep each miner's worker name\"", true);
+    const first = $("sclPlFirst").checked;
+    if (!confirm(`Add ${hostOf(url) || url} to ${ids.map(nameOf).join(", ")}?` + (first ? "\n\nIt becomes their first pool and they restart." : "\n\nIt's added at the end of their pool list (as a backup)."))) return;
+    $("sclPlAdd").disabled = true; $("sclPlAddNote").textContent = "adding…";
+    try {
+      const j = await api("POST", "/api/fleet/action", { action: "add_pool", ids, url, payout, pass: $("sclPlPass").value.trim() || "x",
+        keep_worker: keep, worker: keep ? "" : worker, make_preferred: first, soft_restart: false });
+      const ok = outcome(j, "Add pool");
+      if (first && ok.length) await restartIds(ok);
+    } catch (err) { toast(err.message, true); }
+    $("sclPlAddNote").textContent = ""; $("sclPlAdd").disabled = false;
+    if (window.sclRefresh) await window.sclRefresh();
+    renderPools();
+  }
+  async function plBulk(kind) {
+    const url = $("sclPlBulk").value; if (!url) return;
+    const ids = poolSel().filter(m => ((m.snapshot || {}).pools || []).some(p => String(p.url) === url)).map(m => m.id);
+    if (!ids.length) return;
+    if (!confirm(kind === "first"
+      ? `Switch ${ids.map(nameOf).join(", ")} to ${hostOf(url)}?\n\nIt becomes their first pool and they restart (hashing pauses for about a minute).`
+      : `Remove ${hostOf(url)} from ${ids.map(nameOf).join(", ")}?\n\nA miner mining on it moves to its next pool.`)) return;
+    try {
+      const j = await api("POST", "/api/fleet/action", kind === "first" ? { action: "make_preferred", ids, url, soft_restart: false } : { action: "del_pool", ids, url });
+      const ok = outcome(j, kind === "first" ? "Switch pool" : "Remove pool");
+      if (kind === "first" && ok.length) await restartIds(ok);
+    } catch (err) { toast(err.message, true); }
+    if (window.sclRefresh) await window.sclRefresh();
+    renderPools();
+  }
+  if ($("tabBatch")) $("tabBatch").addEventListener("click", () => setTimeout(renderPools, 0));
+  setInterval(renderPools, 3000);
+
+  buildQuickBar(); buildDetail(); buildPools(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildScale(); buildRef();
   loadNotify().then(() => updateDetailInfo());
   loadHw(); setInterval(loadHw, 15000);
   let lastDetail = null;
