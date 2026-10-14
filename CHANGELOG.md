@@ -3,10 +3,20 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.18.2 (2026-10-14)
+
+- **Rejected-shares strip matches the hashrate graph** (`addon.js`, `rejectStrip`).
+  - It was drawn at most 600 units wide and stretched across the wider hashrate panel, so its text and marks came
+    out about twice as big. Now it's drawn at the graph's own width, margins and label size.
+  - It covers the same **24 hours** (it showed 3 days), with the same hour grid lines and time labels (every 6 h,
+    every 12 h on a phone, the day at midnight, "now" at the right).
+  - So a reject sits right under its X on the graph, and the "last 24 h" counts above it describe what it shows.
+  - On a phone the "not stale" label next to a red mark is left out (the key below says what it means).
+
 ## 1.18.1 (2026-10-14)
 
 - **Miner page: rejected shares moved to the hashrate panel** (`addon.js`, `renderHashPanel`). The rejected-shares
-  counts and their three-day strip now sit under the 24-hour hashrate graph, which marks the same rejects (X),
+  counts and their strip now sit under the 24-hour hashrate graph, which marks the same rejects (X),
   instead of under the best share. The strip is drawn at the wider panel's width.
 
 ## 1.18.0 (2026-10-12)

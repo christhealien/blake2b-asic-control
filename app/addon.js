@@ -121,13 +121,13 @@
     #sclRejects h3 { margin: 0 0 .3rem; font-size: .95rem; }
     #sclRejects .rj-line { font-size: .85rem; line-height: 1.5; }
     #sclRejects .rj-line b.alert { color: var(--bad); }
-    #sclRejects svg { display: block; width: 100%; height: auto; margin: .35rem 0 .1rem; }
-    #sclRejects svg text { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+    #sclRejects svg { display: block; width: 100%; height: auto; margin: .35rem 0 0; }
+    #sclRejects svg text { fill: var(--muted); font-size: 12px; font-family: var(--mono); }
     #sclRejects svg .grid { stroke: var(--line); stroke-width: 1; }
     #sclRejects svg .stale { stroke: var(--muted); stroke-width: 1.6; }
     #sclRejects svg .other { fill: var(--bad); }
     #sclRejects svg text.otherlbl { fill: var(--bad); font-weight: 700; }
-    #sclRejects svg text.unseen { fill: var(--text); font-weight: 700; font-size: 13px; }
+    #sclRejects svg text.unseen { fill: var(--text); font-weight: 700; font-size: 14px; }
     #sclRejects .rj-key { display: flex; flex-wrap: wrap; gap: .2rem 1rem; font-size: .75rem; color: var(--muted); }
   `;
   document.head.appendChild(css);
@@ -502,6 +502,7 @@
     const last = g.points[g.points.length - 1];
     const span0 = (now - g.from) / 3600;
     const tip = `Every 5 minutes from the miner's 20-second hashrate. Low ${fmtTH(Math.min(...vals))} · high ${fmtTH(Math.max(...vals))}${span0 < 23 ? ` · ${span0 < 1 ? "under an hour" : Math.floor(span0) + " h"} so far` : ""}. Marks: R restarted · P setting changed · T tuning started · X a share rejected, not stale. Hover a mark for when and what.`;
+    if (opt.panel) window._sclHashLayout = { W, L, R, every: opt.big ? 6 : 12, at: Date.now() };   // the rejected-shares strip lines up with it
     const avgSpan = span0 >= 23 ? "24 h" : span0 >= 1 ? `${Math.floor(span0)} h` : `${Math.max(1, Math.round(span0 * 60))} min`;
     return `<div style="grid-column:1/-1" title="${esc(tip)}">${head(`avg ${avgSpan} <b style="color:var(--text)">${fmtTH(g.avg)}</b>`)}
       <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;margin-top:.2rem" role="img" aria-label="hashrate over the last 24 hours">
@@ -937,7 +938,7 @@
     // steps, so a resize doesn't redraw it every pixel
     const pw = Math.max(320, (p.clientWidth || chips.clientWidth || 1200) - 24);
     const W = pw >= 1000 ? 1200 : pw >= 700 ? 900 : pw >= 480 ? 640 : 420, Hh = W >= 900 ? 150 : W >= 640 ? 140 : 130;
-    const html = window.sclHashGraph(m, { W, H: Hh, big: W >= 640 }).replace('style="grid-column:1/-1"', "")
+    const html = window.sclHashGraph(m, { W, H: Hh, big: W >= 640, panel: true }).replace('style="grid-column:1/-1"', "")
       + `<p class="muted" style="font-size:.75rem;margin:.4rem 0 0">A point every 5 minutes from the miner's 20-second hashrate${g && g.now != null ? ` (now ${fmtTH(g.now)}${g.since_restart ? `, ${fmtTH(g.since_restart)} on average since its last restart` : ""})` : ""}.
         Marks: <b>R</b> restarted · <b>P</b> setting changed · <b>T</b> tuning started · <b style="color:var(--bad)">X</b> a share rejected, not stale. Hover a mark for when and what.</p>`;
     let body = $("sclHashBody");
@@ -962,27 +963,31 @@
     return bits.join(" · ");
   }
   function rejectStrip(r, width) {
-    // drawn at about its real width, so the text stays readable on a phone
-    const W = Math.round(Math.max(320, Math.min(600, width || 600))), H = 52, L = 6, R = 6, y = 20, now = Date.now() / 1000, span = 3 * 86400;
+    // the same 24 hours, width, margins and hour grid as the hashrate graph above it, so a reject sits right under
+    // its X on the graph (renderHashPanel draws the graph first and leaves its layout here)
+    const pw = Math.max(320, (width || 1200)), Wd = pw >= 1000 ? 1200 : pw >= 700 ? 900 : pw >= 480 ? 640 : 420;
+    const lay = window._sclHashLayout && Date.now() - window._sclHashLayout.at < 120000 ? window._sclHashLayout : { W: Wd, L: 30, R: 30, every: Wd >= 640 ? 6 : 12 };
+    const W = lay.W, L = lay.L, R = lay.R, H = 34, y = 17, now = Date.now() / 1000, span = 86400;
     const xOf = (t) => L + (W - L - R) * (1 - (now - t) / span);
-    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="rejected shares, last 3 days">`;
-    for (const tk of hourTicks(now, span, 24)) {      // the start of each day (midnight in the app's time zone)
-      const x = xOf(tk.t);
-      svg += `<line class="grid" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="6" y2="${H - 16}"/>`
-        + `<text x="${x.toFixed(1)}" y="${H - 3}" text-anchor="middle">${esc(tk.day)} 00:00</text>`;
-    }
-    svg += `<text x="${W - R}" y="${H - 3}" text-anchor="end">now</text>`;
-    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${H - 16}" y2="${H - 16}"/>`;
-    for (const e of r.events || []) {
+    const hrs = hourTicks(now, span, lay.every || 6), narrow = W < 640;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="rejected shares, last 24 hours">`;
+    for (const tk of hrs) { const x = xOf(tk.t).toFixed(1); svg += `<line class="grid" x1="${x}" x2="${x}" y1="2" y2="${H - 2}"/>`; }
+    svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${H - 2}" y2="${H - 2}"/>`;
+    for (const e of (r.events || []).filter(e => e.t > now - span)) {
       const x = xOf(e.t), tip = `${when(e.t)}${e.at ? ` (miner's log ${e.at.slice(11, 16)})` : ""} · ${e.kind === "stale" ? "stale" : e.kind === "other" ? "rejected, NOT stale" + (e.reason ? ` (${e.reason})` : " (no reason given)") : "not found in the miner's log"}${e.n > 1 ? ` · ×${e.n}` : ""}`;
       svg += `<g><title>${esc(tip)}</title>`;
       if (e.kind === "stale") svg += `<line class="stale" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${y - 7}" y2="${y + 7}"/>`;
-      else if (e.kind === "other") svg += `<path class="other" d="M${x.toFixed(1)} ${y - 8}L${(x + 8).toFixed(1)} ${y + 7}L${(x - 8).toFixed(1)} ${y + 7}Z"/><text class="otherlbl" x="${(x > W - 80 ? x - 10 : x + 10).toFixed(1)}" y="${y + 4}" text-anchor="${x > W - 80 ? "end" : "start"}">not stale</text>`;
+      else if (e.kind === "other") svg += `<path class="other" d="M${x.toFixed(1)} ${y - 7}L${(x + 7).toFixed(1)} ${y + 6}L${(x - 7).toFixed(1)} ${y + 6}Z"/>${narrow ? "" : `<text class="otherlbl" x="${(x > W - R - 80 ? x - 10 : x + 10).toFixed(1)}" y="${y + 4}" text-anchor="${x > W - R - 80 ? "end" : "start"}">not stale</text>`}`;
       else svg += `<text class="unseen" x="${x.toFixed(1)}" y="${y + 5}" text-anchor="middle">?</text>`;
-      if (e.n > 1 && e.kind !== "other") svg += `<text x="${(x + 4).toFixed(1)}" y="${y - 9}">×${e.n}</text>`;
-      svg += `<rect x="${(x - 8).toFixed(1)}" y="${y - 12}" width="16" height="24" fill="transparent"/></g>`;
+      if (e.n > 1 && e.kind !== "other") svg += `<text x="${(x + 4).toFixed(1)}" y="${y - 8}">×${e.n}</text>`;
+      svg += `<rect x="${(x - 8).toFixed(1)}" y="0" width="16" height="${H}" fill="transparent"/></g>`;
     }
-    return svg + "</svg>";
+    svg += "</svg>";
+    // the time labels as on the graph: each full hour at its grid line, the day at midnight, "now" at the right edge
+    const axis = `<div style="position:relative;height:1.1em;font-size:.68rem;color:var(--muted);font-family:var(--mono);margin:0 ${(100 * R / W).toFixed(2)}% 0 ${(100 * L / W).toFixed(2)}%">${
+      hrs.map(tk => `<span style="position:absolute;left:${((tk.t - (now - span)) / span * 100).toFixed(2)}%;transform:translateX(-50%);white-space:nowrap">${esc(tk.hh === 0 ? tk.day + " 00:00" : tk.label)}</span>`).join("")
+    }<span style="position:absolute;right:0;white-space:nowrap">now</span></div>`;
+    return svg + axis;
   }
   function renderRejects(r, id) {
     const body = $("sclRejBody"), strip = $("sclRejStrip"); if (!body || !strip) return;
@@ -992,7 +997,7 @@
     body.className = "rj-line";
     body.innerHTML = `<span class="muted">Since restart:</span> ${(+r.accepted).toLocaleString()} accepted · ${(+r.rejected).toLocaleString()} rejected<br>
       <span class="muted">${esc(span)}:</span> ${rejectWords(r)}`;
-    strip.innerHTML = (r.events || []).length ? rejectStrip(r, strip.clientWidth || (strip.parentNode || {}).clientWidth) : "";
+    strip.innerHTML = (r.events || []).some(e => e.t > Date.now() / 1000 - 86400) ? rejectStrip(r, strip.clientWidth || (strip.parentNode || {}).clientWidth) : "";
   }
 
   function applyLocks() {
