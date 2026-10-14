@@ -890,8 +890,8 @@
       loadHw();
     };
     renderShares(h.share, id);
+    renderHashPanel(id);          // first: it holds the rejected-shares strip, which is drawn at its width
     renderRejects(h.rejects, id);
-    renderHashPanel(id);
   }
 
   const when = (t) => {          // in the app's time zone, like the graphs: the time today, else the day too
@@ -940,7 +940,12 @@
     const html = window.sclHashGraph(m, { W, H: Hh, big: W >= 640 }).replace('style="grid-column:1/-1"', "")
       + `<p class="muted" style="font-size:.75rem;margin:.4rem 0 0">A point every 5 minutes from the miner's 20-second hashrate${g && g.now != null ? ` (now ${fmtTH(g.now)}${g.since_restart ? `, ${fmtTH(g.since_restart)} on average since its last restart` : ""})` : ""}.
         Marks: <b>R</b> restarted · <b>P</b> setting changed · <b>T</b> tuning started · <b style="color:var(--bad)">X</b> a share rejected, not stale. Hover a mark for when and what.</p>`;
-    if (p._last !== html) { p.innerHTML = html; p._last = html; }
+    let body = $("sclHashBody");
+    if (!body) { body = document.createElement("div"); body.id = "sclHashBody"; p.prepend(body); }
+    if (body._last !== html) { body.innerHTML = html; body._last = html; }
+    // rejected shares sit with the hashrate (it marks them too), not with the best share
+    const rj = $("sclRejects");
+    if (rj && rj.parentNode !== p) p.appendChild(rj);
   }
 
   // Rejected shares: how many, and which kind (rejects_addon.py)

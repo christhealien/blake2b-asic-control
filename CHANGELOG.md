@@ -3,6 +3,12 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.18.1 (2026-10-14)
+
+- **Miner page: rejected shares moved to the hashrate panel** (`addon.js`, `renderHashPanel`). The rejected-shares
+  counts and their three-day strip now sit under the 24-hour hashrate graph, which marks the same rejects (X),
+  instead of under the best share. The strip is drawn at the wider panel's width.
+
 ## 1.18.0 (2026-10-12)
 
 - **Power estimate for the SC Box and HS Box** (`fan_addon.BOX_POWER`, `widget_server.py`, `addon.js`). Fleet cards,
