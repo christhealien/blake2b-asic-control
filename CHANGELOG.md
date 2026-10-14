@@ -3,6 +3,27 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.18.0 (2026-10-12)
+
+- **Power estimate for the SC Box and HS Box** (`fan_addon.BOX_POWER`, `widget_server.py`, `addon.js`). Fleet cards,
+  the Miner page, presets, the Tuner page and the overview widget now estimate their wall power from crProductGuy's
+  plug-in meter readings: SC Box 176 W at 550 MHz, HS Box 155.6 W at 850 MHz.
+  - Power follows the clock alone (93 % of it with the clock, 7 % fixed, as on the SC Lite but with no voltage term).
+    That matches his other steps within about 1 W: 525 MHz on the SC Box gives 169 W, measured 169–171.
+  - J/TH comes from the hashrate he measured at the same clocks.
+  - Calibrate it to your own unit on its Miner page with a meter.
+  - The widget uses the clock the boards report on port 4028. Before, a box counted at its rated watts.
+- **Firmware check** (`fan_addon.firmware_check`). The Miner page compares a miner's firmware with the newest the
+  maker lists on its firmware download page for that model (as of 2026-10-12: SC Box 2.2.5, SC Box II 2.2.2, HS Box
+  and HS Box II 2.2.6, HS Lite 2.2.5; the SC Lite isn't listed).
+  - On a newer listing it shows "Newer firmware listed" and a link to that page; otherwise "the latest listed".
+  - The app never downloads or installs firmware, and the list ships with the app (nothing is fetched).
+- **Tuner files for sending** (`tuner_addon.download`, `what=share`): a zip of a miner's tuner files with IP and MAC
+  addresses, web and pool addresses, e-mail addresses, token-like text and the miner's name taken out (the same filters
+  as Download report), for sending to a tester or attaching to an issue. The Tuner page has the link next to
+  "Everything (.zip)".
+- A box with no presets yet points to Profiles (*Make four from its clock*) as well as the Tuner.
+
 ## 1.17.0 (2026-10-10)
 
 **Clock control, clock presets and a clock tuner for the SC Box and HS Box.** Built on crProductGuy's clock and

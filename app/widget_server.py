@@ -128,11 +128,14 @@ def _tuning(mid: str) -> dict[str, Any] | None:
     last = step[-1]
     ph = PHASES.get(str(last.get("phase") or ""), str(last.get("phase") or ""))
     try:
-        plan = (int(last["mhz"]), int(last["mv"]), int(last["pv"]))
+        plan = (int(last["mhz"]), int(last["mv"]), int(last["pv"] or 0))   # a box run's rows have no PV
     except (KeyError, TypeError, ValueError):
         plan = None
     what = f"testing {last.get('mhz')} MHz" if ph == "testing" else ph
     return {"what": what, "plan": plan}
+
+
+BOX_POWER = {"sc-box": {"w": 176.0, "mhz": 550}, "hs-box": {"w": 155.6, "mhz": 850}}   # as fan_addon.BOX_POWER
 
 
 def _watts(row: dict[str, Any], plan: tuple[int, int, int] | None) -> float | None:
@@ -141,11 +144,17 @@ def _watts(row: dict[str, Any], plan: tuple[int, int, int] | None) -> float | No
     wall-reading calibration applies). Copied rather than imported: importing fan_addon patches the dashboard's
     fan controller. None when the model's rated power or stock plan isn't known."""
     hw = row.get("hardware") or {}
+    cal = _num((row.get("power_cal") or {}).get("factor")) or 1.0
+    ref = BOX_POWER.get(str(hw.get("profile") or "")) if hw.get("plan_format") == "box" else None
+    if ref:      # SC Box / HS Box: power follows the clock alone (fan_addon.BOX_POWER, a tester's wall readings)
+        mhz = _num((hw.get("running_read") or {}).get("mhz")) or ref["mhz"]
+        if plan and plan[0]:
+            mhz = plan[0]
+        return ref["w"] * cal * (0.07 + 0.93 * (int(mhz / 12.5) * 12.5) / ref["mhz"])
     stock = hw.get("stock") or {}
     rated = _num(hw.get("rated_watts"))
     if not rated:
         return None
-    cal = _num((row.get("power_cal") or {}).get("factor")) or 1.0
     s_mhz, s_pv = _num(stock.get("mhz")), _num(stock.get("pv"))
     if not s_mhz or not s_pv:
         # no stock plan on record: a read-only model (SC Box, HS Box) runs its firmware's own setting, so its
@@ -167,6 +176,8 @@ def _power_plan(row: dict[str, Any], tune_plan: tuple[int, int, int] | None) -> 
             return got
     p = row.get("_preset") or {}
     try:
+        if p.get("box"):
+            return (int(p["mhz"]), 0, 0)      # an SC Box / HS Box preset: a clock only
         return (int(p["mhz"]), int(p["mv"]), int(p["pv"]))
     except (KeyError, TypeError, ValueError):
         return None   # SC Box / HS Box are read only here, so they run their stock plan
@@ -209,7 +220,10 @@ def _read(row: dict[str, Any]) -> dict[str, Any]:
     else:
         out["status"], out["icon"] = "Hashing", "🟢"
     # power only while it hashes (an idle miner draws little, and the card shows no estimate for it either)
-    out["watts"] = _watts(row, _power_plan(row, plan)) if out["ths"] >= 0.05 else 0.0
+    pp = _power_plan(row, plan)
+    if ((row.get("hardware") or {}).get("plan_format")) == "box" and out.get("clock"):
+        pp = (int(out["clock"]), 0, 0)     # a box: the clock its boards report now (port 4028)
+    out["watts"] = _watts(row, pp) if out["ths"] >= 0.05 else 0.0
 
     # the profile it's running: a preset only while the miner is still on that preset's clock
     p = row.get("_preset") or None

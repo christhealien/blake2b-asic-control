@@ -539,6 +539,7 @@
         <a class="dl" data-what="chips" href="#">Chip data (.csv)</a>
         <a class="dl" data-what="live" href="#">Live readings (.csv)</a>
         <a class="dl" data-what="zip" href="#">Everything (.zip)</a>
+        <a class="dl" data-what="share" href="#" title="The same files with IP and MAC addresses, pool and web addresses and the miner's name taken out: for sending to a tester or attaching to an issue">For sending, private details out (.zip)</a>
       </div>
       <p class="footer-note" id="folder"></p>
     </section>
@@ -1284,7 +1285,7 @@ function render(s) {
     const cls = (r.result.startsWith("PASS") || r.result === "CONFIRMED") ? "res-pass" : r.result === "BASELINE" ? "res-base" : "res-fail";
     return `<tr class="pick" data-key='${esc(testKey(r))}' title="Show this test on the chip map"><td class="mono">${esc(r.time.replace("T", " ").slice(5, 16))}</td><td class="num">${esc(r.mhz)}</td>
       <td class="num">${esc(isBoxRow(r.pv) ? voltTxt(r.mv, r.pv) : r.mv)}</td><td class="num">${isBoxRow(r.pv) ? "—" : esc(r.pv)}</td><td class="${cls}">${esc(r.result)}</td>
-      <td class="num">${r.avg_ths ? (+r.avg_ths).toFixed(2) : "—"}</td>${(() => { const w = estW(+r.mhz, +r.pv);
+      <td class="num">${r.avg_ths ? (+r.avg_ths).toFixed(2) : "—"}</td>${(() => { const w = estW(+r.mhz, pm && pm.box ? 1 : +r.pv);
         return `<td class="num">${w ? Math.round(w) : "—"}</td><td class="num">${w && +r.avg_ths > 0.05 ? Math.round(w / r.avg_ths) : "—"}</td>`; })()}<td class="num">${r.max_temp ? (+r.max_temp).toFixed(1) : "—"}</td><td>${esc(r.reason)}</td></tr>`;
   }).join("") : `<tr><td colspan="10" class="muted">None yet.</td></tr>`;
   $("failChips").innerHTML = (s.fail_chips || []).length

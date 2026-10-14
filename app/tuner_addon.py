@@ -1078,7 +1078,28 @@ def download(handler: Any, q: dict[str, list[str]], json_response: Callable) -> 
                 if p.is_file() and not p.name.endswith((".tmp", ".pid.json")):
                     z.write(p, p.name)
         return _send_file(handler, buf.getvalue(), f"{base}.zip", "application/zip")
-    json_response(handler, 400, {"ok": False, "error": "what must be log, fulllog, results, chips, live, plan, presets or zip"})
+    if what == "share":
+        # the same files, ready to send to someone helping you (a tester, an issue on GitHub): IP, MAC, web and
+        # pool addresses, e-mails and anything token-like taken out, and the miner's name and id replaced
+        if not f.dir.is_dir():
+            return json_response(handler, 404, {"ok": False, "error": "no tuner files for this miner yet"})
+        import report_addon
+        info = _read_json(f.pid) or {}
+        names = sorted({str(x) for x in (info.get("miner_name"), mid, safe_id(mid)) if x and len(str(x)) >= 3}, key=len, reverse=True)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in sorted(f.dir.iterdir()):
+                if not p.is_file() or p.name.endswith((".tmp", ".pid.json", "_source.json")):
+                    continue
+                text = report_addon.scrub_text(p.read_text(errors="replace"))
+                for n in names:
+                    text = text.replace(n, "miner")
+                z.writestr(p.name, text)
+            z.writestr("README.txt", "Tuner files from Blake2b ASIC Control, for sending: IP and MAC addresses, web and pool "
+                       "addresses, e-mail addresses, token-like text and the miner's name were taken out. Look through them "
+                       "before sending.\n")
+        return _send_file(handler, buf.getvalue(), f"asic_tuner-share-{stamp}.zip", "application/zip")
+    json_response(handler, 400, {"ok": False, "error": "what must be log, fulllog, results, chips, live, plan, presets, zip or share"})
 
 
 def handle_get(handler: Any, path: str, json_response: Callable) -> bool:

@@ -304,7 +304,9 @@
     if (String(id).startsWith("demo-")) return `<span class="muted" style="font-size:.8rem">Presets: (demo miner)</span>`;
     const h = HW[id] || {}, ps = h.presets || {};
     const keys = [...ORDER.filter(k => ps[k]), ...Object.keys(ps).filter(k => !ORDER.includes(k) && k !== "idle"), ...(ps.idle ? ["idle"] : [])];
-    if (!keys.filter(k => k !== "idle").length && !ps.idle) return `<span class="muted" style="font-size:.8rem">No presets yet: <a href="/tuner.html?miner=${encodeURIComponent(id)}">run the tuner</a></span>`;
+    if (!keys.filter(k => k !== "idle").length && !ps.idle) return h.box
+      ? `<span class="muted" style="font-size:.8rem">No presets yet: <a href="/profiles.html?miner=${encodeURIComponent(id)}">make four from its clock</a> or <a href="/tuner.html?miner=${encodeURIComponent(id)}">run the tuner</a></span>`
+      : `<span class="muted" style="font-size:.8rem">No presets yet: <a href="/tuner.html?miner=${encodeURIComponent(id)}">run the tuner</a></span>`;
     const btns = keys.map(k => {
       const p = ps[k], on = h.active === k;
       return `<button type="button" class="scl-pbtn ${on ? "active" : ""}${p.idle ? " scl-idle" : ""}" data-preset="${esc(k)}" data-id="${esc(id)}" ${h.tuning ? "disabled" : ""}
@@ -408,6 +410,8 @@
   // the clock / mV / PV the miner really runs: its manual setting when manual is on, else the firmware level it
   // has selected (its stock plan; Idle has 0 MHz). manualPowerplan can hold an old setting that isn't running.
   const planOf = (m) => {
+    const bx = (HW[m.id] || {}).box;
+    if (bx) return { mhz: bx.running || 0, mv: 0, pv: 1, box: true };   // SC Box / HS Box: the clock alone
     const sn = m.snapshot || {}, st = sn.setting || {}, p = sn.plan || {};
     if (st.manual === false && Array.isArray(st.powerplans)) {
       const lvl = st.powerplans.find(x => x && String(x.level) === String(st.select ?? 0));
@@ -421,7 +425,7 @@
     if (String(m.id).startsWith("demo-")) return "";
     const h = HW[m.id] || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv), hl = h.health;
     const pw = h.active === "idle" ? "idle: not hashing" : e ? `≈ ${e.w} W · ${e.amps} A` + (e.wth ? ` · ${e.wth} J/TH` : "") : "—";
-    const tipP = e ? `Estimate for ${pl.mhz} MHz${e.eff !== pl.mhz ? ` (runs ${e.eff})` : ""} · PV ${pl.pv}, at ${e.mains} V${h.power_model && h.power_model.cal_info ? " · calibrated to your wall reading" : " · not calibrated (Miner page)"}` : "Needs the miner's rated power and stock setting (probe it)";
+    const tipP = e ? `Estimate for ${pl.mhz} MHz${e.eff !== pl.mhz ? ` (runs ${e.eff})` : ""}${pl.box ? " (from a tester's wall readings on this model)" : ` · PV ${pl.pv}`}, at ${e.mains} V${h.power_model && h.power_model.cal_info ? " · calibrated to your wall reading" : " · not calibrated (Miner page)"}` : "Needs the miner's rated power and stock setting (probe it)";
     const ch = !hl ? `<span class="muted">checking…</span>` : hl.weak.length ? `<span style="color:var(--bad);font-weight:600">${hl.weak.length} weak</span> <span class="muted">${esc(hl.weak.slice(0, 2).join(", "))}</span>`
       : hl.watch.length ? `${hl.watch.length} to watch` : "all healthy";
     return `<div title="${esc(tipP)}"><div class="label">Power (estimate)</div><div class="value" style="font-size:.85rem">${pw}</div></div>
@@ -811,6 +815,9 @@
     const h = HW[id] || {};
     const bits = [];
     bits.push(`<span>Detected as <b>${esc(h.probing ? "probing…" : h.line || "not probed yet")}</b></span>`);
+    const fw = h.firmware_check;   // compared with the newest firmware the maker lists (the app never installs any)
+    if (fw && fw.status === "older") bits.push(`<span title="The maker's firmware page listed ${esc(fw.latest)} for this model on ${esc(fw.as_of)}. The app doesn't install firmware: read the release notes there first; there's no need to update if everything works."><b style="color:var(--warn)">Newer firmware listed: ${esc(fw.latest)}</b> <a href="${esc(fw.page)}" target="_blank" rel="noopener">maker's firmware page</a></span>`);
+    else if (fw && fw.status === "current") bits.push(`<span class="muted" title="The newest the maker listed for this model on ${esc(fw.as_of)}">Firmware ${esc(fw.firmware)}: the latest listed</span>`);
     const st = (h.hardware || {}).stock;
     if (st) bits.push(`<span title="The firmware's own stock power plan (the tuner's baseline). The miner runs clocks in 12.5 MHz steps.">Stock <b>${st.mhz}${Math.floor(st.mhz / 12.5) * 12.5 !== st.mhz ? ` (runs ${Math.floor(st.mhz / 12.5) * 12.5})` : ""} MHz · ${st.mv} mV · PV ${st.pv}</b></span>`);
     const hwd = h.hardware || {}, sr = hwd.stock_read, rr = hwd.running_read;
@@ -862,7 +869,7 @@
     }
     const m = (S().miners || []).find(x => x.id === id) || {}, pl = planOf(m), e = h.active === "idle" ? null : estW(h.power_model, pl.mhz, pl.pv);
     if (h.active === "idle") bits.push(`<span title="The firmware's own Idle mode: the hash boards are off. Any other preset wakes it.">Idle: <b>not hashing</b></span>`);
-    if (e) bits.push(`<span title="PV is the voltage the boards really get; power follows clock × PV²">Power <b>≈ ${e.w} W</b> · ${e.amps} A at ${e.mains} V${e.wth ? ` · ${e.wth} J/TH` : ""}${e.eff !== pl.mhz ? ` · runs ${e.eff} MHz` : ""}
+    if (e) bits.push(`<span title="${pl.box ? "On this model power follows the clock (a tester's wall readings: about 7 W per 25 MHz on the SC Box, 4–5 W on the HS Box). Calibrate it with your own meter." : "PV is the voltage the boards really get; power follows clock × PV²"}">Power <b>≈ ${e.w} W</b> · ${e.amps} A at ${e.mains} V${e.wth ? ` · ${e.wth} J/TH` : ""}${e.eff !== pl.mhz ? ` · runs ${e.eff} MHz` : ""}
       <a href="#" class="scl-cal">${h.power_model && h.power_model.cal_info ? "calibrated" : "calibrate"}</a></span>`);
     bits.push(`<span>Preset <b>${esc(h.preset || "none")}</b></span>`);
     if (bellHtml(id)) bits.push(`<span>${bellHtml(id)}</span>`);
@@ -873,7 +880,7 @@
     if (cal) cal.onclick = async (ev) => {
       ev.preventDefault();
       const m2 = (S().miners || []).find(x => x.id === id) || {}, p2 = planOf(m2), pm = h.power_model || {};
-      const v = prompt(`Power estimate calibration for ${nameOf(id)}\n\nRead the wall power with a plug-in meter while the miner runs ${p2.mhz} MHz · PV ${p2.pv}, and enter the watts here.\nEmpty clears the calibration. (Mains voltage now ${pm.mains_v || 110} V: type e.g. "v220" to change it.)`, "");
+      const v = prompt(`Power estimate calibration for ${nameOf(id)}\n\nRead the wall power with a plug-in meter while the miner runs ${p2.box ? p2.mhz + " MHz" : `${p2.mhz} MHz · PV ${p2.pv}`}, and enter the watts here.\nEmpty clears the calibration. (Mains voltage now ${pm.mains_v || 110} V: type e.g. "v220" to change it.)`, "");
       if (v === null) return;
       try {
         if (/^v\s*\d+/i.test(v.trim())) { await api("POST", "/api/hardware/mains", { mains_v: Number(v.trim().slice(1)) }); toast("Mains voltage saved"); }

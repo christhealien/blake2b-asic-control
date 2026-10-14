@@ -32,7 +32,8 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   one runs cleanly, judging every chip against its own normal error rate while holding the boards at a
   temperature you choose. It confirms the winner and builds and tests the four presets, each with its
   own fan curve. **Rebuild the presets** tests them again from the last search's curve (for example at
-  another temperature) in a few hours instead of a day. Several miners can tune at once.
+  another temperature) in a few hours instead of a day. Several miners can tune at once. Its files can be
+  downloaded with private details taken out, for sending to someone helping you.
   The **SC Box and HS Box** get a clock tuner: it learns every chip's normal error rate, steps the clock
   up 25 MHz at a time until a step isn't clean, confirms the fastest clean clock, then builds and tests
   the four clock presets.
@@ -97,6 +98,9 @@ and since 1.17 the app sets their **clock**:
   at a time until a step isn't clean, a confirm of the fastest clean clock, then the four presets,
   each tested. It ends on High when High passed; otherwise, or when stopped, it puts back exactly what
   the miner ran before. The first runs on these models are new: watch them.
+- **Power estimate** from crProductGuy's wall-meter readings (SC Box 176 W at 550 MHz, HS Box 155.6 W at
+  850 MHz; power follows the clock, about 7 W and 4–5 W per 25 MHz). Calibrate it to your unit on its
+  Miner page.
 - **Going back to a stock plan** writes the stock clock first: on the HS Box, turning the manual
   setting off alone kept the last clock written.
 
@@ -112,6 +116,10 @@ Box's kept their speed. Changes are at least a minute apart.
 **SC5 Pro II.** Its power plan has the same format as the SC Lite's, so presets, auto fan and the
 tuner can work, but they haven't been run on one: the tuner only starts with "allow untested
 models", and should be watched closely.
+
+**Firmware:** the Miner page compares each miner's firmware with the newest the maker lists for its
+model on its firmware download page (the list ships with the app; the app never downloads or installs
+firmware). Updating is your call: "no need to upgrade if everything is fine", as the maker's page puts it.
 
 **Have a model or firmware that isn't tested yet?** Open **Profiles**, pick the miner and press
 **Download report**. It reads the miner (one request at a time, nothing is changed, about 30 s) and

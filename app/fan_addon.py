@@ -1300,6 +1300,42 @@ def _sync_idle_preset(doc: dict[str, Any], mid: str, hw: dict[str, Any]) -> None
                 m["active_preset"] = None
 
 
+# The newest firmware the maker lists for each Blake2b model on its firmware download page (checked 2026-10-12).
+# The app never downloads or installs firmware; it only says when a newer one is listed. The SC Lite isn't listed
+# there (its 2.2.0 is the one in use).
+FIRMWARE_LATEST = {"scbox": "2.2.5", "scboxii": "2.2.2", "hsbox": "2.2.6", "hsboxii": "2.2.6", "hslite": "2.2.5"}
+FIRMWARE_AS_OF = "2026-10-12"
+FIRMWARE_PAGE = "https://github.com/goldshellminer/firmware"
+
+
+def _model_key(model: Any) -> str:
+    """'Brand-SCBox' / 'SC-BOX II' / 'SC-BOXⅡ' -> 'scbox' / 'scboxii'."""
+    m = str(model or "").lower().replace("ⅱ", "ii").replace("ⅲ", "iii")
+    m = m.split("-", 1)[1] if m.count("-") and not m.split("-", 1)[0].startswith(("sc", "hs")) else m
+    m = re.sub(r"[^a-z0-9]", "", m)
+    return re.sub(r"(box|lite|pro)2$", r"\1ii", m)
+
+
+def _ver(v: Any) -> tuple[int, ...] | None:
+    got = re.findall(r"\d+", str(v or ""))
+    return tuple(int(x) for x in got[:4]) if got else None
+
+
+def firmware_check(hw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """How this miner's firmware compares with the newest the maker lists: current, older (a newer one is listed),
+    newer (newer than the list), or unlisted (the maker lists none for this model)."""
+    hw = hw or {}
+    if not hw.get("ok") or not hw.get("firmware"):
+        return None
+    latest = FIRMWARE_LATEST.get(_model_key(hw.get("model")))
+    have = _ver(hw.get("firmware"))
+    out = {"firmware": str(hw["firmware"])[:20], "latest": latest, "as_of": FIRMWARE_AS_OF, "page": FIRMWARE_PAGE}
+    if not latest or not have:
+        return {**out, "status": "unlisted"}
+    lv = _ver(latest)
+    return {**out, "status": "current" if have == lv else "older" if have < lv else "newer"}
+
+
 def hw_line(hw: dict[str, Any] | None) -> str:
     if not hw:
         return "not probed yet"
@@ -1401,14 +1437,27 @@ def health_tick() -> None:
     threading.Thread(target=run, daemon=True, name="chip-health").start()
 
 
+# SC Box / HS Box: wall power and hashrate at one clock, measured by crProductGuy with a plug-in meter (fw 2.2.5 /
+# 2.2.6, Oct 2026). On these boxes the voltage made no measurable difference, so power follows the clock alone; the
+# same model as the SC Lite's with the voltage term fixed (pv 1) matches his other steps within about 1 W
+# (SC Box: about 7 W per 25 MHz, HS Box 4-5 W). Calibrate it to your own unit on its Miner page.
+BOX_POWER = {"sc-box": {"w": 176.0, "mhz": 550, "ths": 0.699},
+             "hs-box": {"w": 155.6, "mhz": 850, "ths": 0.544}}
+
+
 def power_model(doc: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | None:
     """What the power estimate needs: the model's rated watts / TH/s at its stock plan, and a
     calibration from a wall reading, if you gave one."""
     hw = row.get("hardware") or {}
+    pw = doc.get("power") or {}
+    ref = BOX_POWER.get(str(hw.get("profile") or "")) if hw.get("plan_format") == "box" else None
+    if ref:
+        return {"rated_w": ref["w"], "rated_ths": ref["ths"], "mhz": ref["mhz"], "pv": 1, "box": True,
+                "cal": float((row.get("power_cal") or {}).get("factor") or 1.0), "mains_v": float(pw.get("mains_v") or 110),
+                "cal_info": row.get("power_cal"), "measured": True}
     stock = hw.get("stock") or {}
     if not hw.get("rated_watts") or not stock.get("mhz") or not stock.get("pv"):
         return None
-    pw = doc.get("power") or {}
     return {"rated_w": hw["rated_watts"], "rated_ths": hw.get("rated_ths"), "mhz": stock["mhz"], "pv": stock["pv"],
             "cal": float((row.get("power_cal") or {}).get("factor") or 1.0), "mains_v": float(pw.get("mains_v") or 110),
             "cal_info": row.get("power_cal")}
@@ -1417,6 +1466,8 @@ def power_model(doc: dict[str, Any], row: dict[str, Any]) -> dict[str, Any] | No
 def estimate_watts(pm: dict[str, Any] | None, mhz: float, pv: float) -> dict[str, Any] | None:
     """Wall power estimate: chips scale with clock x voltage^2 (PV is the real board voltage); about
     7% (fans, control board) doesn't. Clocks run in 12.5 MHz steps."""
+    if pm and pm.get("box"):
+        pv = 1             # a box: the clock alone (its presets have no PV)
     if not pm or not mhz or not pv:
         return None
     eff = (int(mhz / 12.5)) * 12.5
@@ -1496,6 +1547,7 @@ def hardware_list() -> dict[str, Any]:
                     "tuner": tuner_addon.plan_limits(hw),
                     "box": box_limits(hw),
                     "box_tuner": tuner_addon.box_tuner_limits(hw),
+                    "firmware_check": firmware_check(hw),
                     "in_charge": in_charge(doc, mid),
                     "power_model": power_model(doc, m),
                     "health": _health.get(mid),
