@@ -384,7 +384,7 @@
         <div class="mode-cards">
           <label class="mode-card"><input type="radio" name="fans" value="hold" id="fansHold" checked />
             <span><b>Hold a steady temperature (recommended)</b>
-            <small>The tuner takes over this miner's fans and keeps the hottest board at your target, so every setting is
+            <small>The tuner takes over this miner's fans and keeps the hottest chip (or the board sensor) at your target, so every setting is
               judged at the same temperature. It records how much fan each setting needs; that's what the preset fan curves
               are built from. The dashboard's auto fan waits for this miner until the run ends.</small></span></label>
           <label class="mode-card"><input type="radio" name="fans" value="leave" id="fansLeave" />
@@ -395,9 +395,9 @@
         <div class="form-grid hold-only" style="margin-top:.7rem">
           <label id="lblHoldC">Target temperature °C<input type="number" id="f_fan_hold_c" step="1" /></label>
           <label>Lowest fan %<input type="number" id="f_fan_min" step="5" /></label>
+          <label>Hold on<select id="f_hold_on"><option value="chip" selected>hottest chip (recommended)</option><option value="board">the board sensor</option></select></label>
         </div>
-        <p class="hint hold-only" id="holdHint"><b>Target:</b> the temperature the hottest board is held at during the search (and for the
-          High preset). 60 °C is a good start. <b>Lowest fan:</b> the fans never go below this, even when the boards are cool.</p>
+        <p class="hint hold-only" id="holdHint"></p>
       </div>
 
       <div class="fsec search-only">
@@ -663,6 +663,7 @@ function fillForm(d, info) {
   $("f_boost").checked = true;      // the curve always adds voltage where a clock needs it
   for (const k of FAN_OPTS) $("f_" + k).value = (src[k] ? src[k] : d[k]);
   (src.fans === "leave" ? $("fansLeave") : $("fansHold")).checked = true;
+  $("f_hold_on").value = src.hold_on === "board" ? "board" : "chip";   // the last run's choice; new runs: the hottest chip
   $("f_presets").checked = src.presets ?? true;
   $("f_any_model").checked = !!src.any_model;
   $("f_pv_offset").value = src.pv_offset ?? "";
@@ -748,14 +749,18 @@ function syncOptions() {
   document.querySelectorAll(".pbase-fresh").forEach(e => e.classList.toggle("hidden", pbase() !== "fresh"));
   if (P) {
     const src = SRC[viewId] || {};
-    $("holdHint").innerHTML = `<b>During a rebuild</b> the fresh baseline is held at ${src.hold_c ? `<b>${src.hold_c} °C</b>, where the search held it` : "the High preset's temperature"}, so the error rates compare like for like; each preset is then held at its own temperature (section ${document.querySelector("#ppSec .num").textContent}). <b>Lowest fan:</b> the fans never go below this.`;
+    $("holdHint").innerHTML = `<b>During a rebuild</b> the fresh baseline is held at ${src.hold_c ? `<b>${src.hold_c} °C</b>, where the search held it` : "the High preset's temperature"}, so the error rates compare like for like; each preset is then held at its own temperature (section ${document.querySelector("#ppSec .num").textContent}), on ${((src.options || {}).hold_on) === "chip" ? "the hottest chip" : "the board sensor"} as the search was (the Hold on choice doesn't apply to a rebuild). <b>Lowest fan:</b> the fans never go below this.`;
     const t = ptemps(), h = +(src.hold_c || 0);
     $("ptHint").innerHTML = hold
       ? `Each preset is held at its own temperature while it's tested, and gets a fan curve built from the fan it needed there.${h ? ` The curve was measured at ${h} °C: a preset ${t.some(x => x > h) ? "warmer than that may need more voltage or one clock less" : "at or below that is the easy case (louder fans, same or less voltage)"}.` : ""}
          A preset that fails gets one voltage step more, then one clock step less, up to 3 tries; a close call is retested once.`
       : "Fans are left alone, so the presets are tested at whatever temperature the miner runs and get no fan curve of their own.";
-  } else $("holdHint").innerHTML = `<b>Target:</b> the temperature the hottest board is held at during the search (and for the
-          High preset). 60 °C is a good start. <b>Lowest fan:</b> the fans never go below this, even when the boards are cool.`;
+  } else $("holdHint").innerHTML = `<b>Target:</b> the temperature held during the search (and for the High preset).
+          <b>Hold on the hottest chip</b> (recommended): the board sensor plus how much hotter the hottest chip runs, read from
+          the miner's own log every 10 minutes (often 5–10 °C). The chips are what overheat, so 70 °C then means the chips at
+          70 °C, and a chip that reaches the abort temperature + 2 °C stops the run. <b>Board sensor</b> holds the cooler sensor
+          (older runs did this): pick a target about 8 °C lower to get the same chips. <b>Lowest fan:</b> the fans never go
+          below this, even when the miner is cool.`;
   if (hold && pre) {
     const t = presetTemps({ fan_hold_c: num("f_fan_hold_c"), preset_max_c: num("f_preset_max_c"), abort_c: num("f_abort_c") });
     $("presetTemps").innerHTML = `Each preset is held at its own temperature so the quieter ones get quieter fan curves:
@@ -821,7 +826,8 @@ function collect() {
     const b = { miner_id: $("viewMiner").value, mode: "presets", baseline: pbase(), sigma: num("f_sigma"), abort_c: num("f_abort_c"),
       weak: $("f_weak").checked, any_model: $("f_any_model").checked, fans: fans(), preset_min: num("f_ppreset_min") };
     if (b.baseline === "fresh") b.baseline_min = num("f_pbase_min");
-    if (b.fans === "hold") { b.fan_min = num("f_fan_min"); b.preset_temps = ptemps(); }
+    if (b.fans === "hold") { b.fan_min = num("f_fan_min"); b.preset_temps = ptemps();
+      b.hold_on = ((SRC[b.miner_id] || {}).options || {}).hold_on || "board"; }   // a rebuild holds what its search held
     return b;
   }
   const body = { miner_id: $("viewMiner").value };
@@ -833,7 +839,7 @@ function collect() {
   body.any_model = $("f_any_model").checked;
   body.pv_offset = $("f_pv_offset").value.trim();
   body.fans = fans();
-  if (body.fans === "hold") { body.fan_hold_c = num("f_fan_hold_c"); body.fan_min = num("f_fan_min"); }
+  if (body.fans === "hold") { body.fan_hold_c = num("f_fan_hold_c"); body.fan_min = num("f_fan_min"); body.hold_on = $("f_hold_on").value; }
   body.presets = body.mode === "search" && $("f_presets").checked;
   if (body.presets) { body.preset_min = num("f_preset_min"); if (body.fans === "hold") body.preset_max_c = num("f_preset_max_c"); }
   body.min_mhz = body.mode === "search" && $("f_min_mhz").value.trim() !== "" ? num("f_min_mhz") : null;
@@ -967,7 +973,7 @@ function planHtmlPresets(b) {
   return `<dl class="kvline">
       <dt>Miner</dt><dd>${esc(m ? m.textContent : b.miner_id)}${b.any_model ? " (untested models allowed)" : " (SC Lite only)"}</dd>
       <dt>Option</dt><dd>Rebuild the presets from ${esc(src.label || "the last search")}</dd>
-      <dt>Fans</dt><dd>${hold ? `held per preset, never below ${b.fan_min} %` : "left alone"}</dd>
+      <dt>Fans</dt><dd>${hold ? `held per preset on the ${b.hold_on === "board" ? "board sensor" : "hottest chip"}, never below ${b.fan_min} %` : "left alone"}</dd>
       <dt>Time</dt><dd>roughly ${t.lo.toFixed(1)}–${t.hi.toFixed(1)} hours (failed steps end early)</dd>
     </dl>
     <ol class="plan">${steps.map(x => `<li>${x}</li>`).join("")}</ol>
@@ -1012,7 +1018,7 @@ function planHtml(b) {
       <dt>Miner</dt><dd>${esc(m ? m.textContent : b.miner_id)}${b.any_model ? " (untested models allowed)" : " (SC Lite only)"}</dd>
       <dt>Detected as</dt><dd>${esc((HW[b.miner_id] || {}).line || "not probed")}</dd>
       <dt>Option</dt><dd>${b.mode === "search" ? "Map every clock and voltage" : "Confirm one setting"}</dd>
-      <dt>Fans</dt><dd>${b.fans === "hold" ? `held at ${b.fan_hold_c} °C, never below ${b.fan_min} %` : "left alone"}</dd>
+      <dt>Fans</dt><dd>${b.fans === "hold" ? `held at ${b.fan_hold_c} °C on the ${b.hold_on === "board" ? "board sensor" : "hottest chip"}, never below ${b.fan_min} %` : "left alone"}</dd>
       ${b.mode === "search" ? `<dt>Presets</dt><dd>${b.presets ? "built and tested at the end" : "not built"}</dd>` : ""}
       <dt>Time</dt><dd>${t.hi === null ? `about ${t.lo.toFixed(1)} hours` : `roughly ${t.lo.toFixed(1)}–${t.hi.toFixed(1)} hours (failed steps end early)`}</dd>
     </dl>
@@ -1156,7 +1162,7 @@ function rpParams(o, p) {
       ["Baseline", o.baseline === "reuse" ? `reused from ${o.source_when || "the search"}` : `${o.start_mhz} MHz · ${o.mv} mV · ${o.baseline_min} min`],
       ["High", o.high ? `${o.high.mhz} MHz · ${o.high.mv} mV` : "—"],
       ["Presets", `${o.preset_min} min each` + (o.preset_temps ? ` · ${o.preset_temps.join(" / ")} °C` : "")],
-      ["Fans", o.fans === "hold" ? `held per preset · never below ${o.fan_min}%` : "left alone"],
+      ["Fans", o.fans === "hold" ? `held per preset${o.hold_on === "chip" ? " on the hottest chip" : ""} · never below ${o.fan_min}%` : "left alone"],
       ["Tests", `sensitivity ${o.sigma}${o.weak === false ? "" : " · easier on noisy chips"}`],
       ["Safety", `stops at ${o.abort_c} °C`]];
     if (p && p.started) rows.push(["Started", p.started.replace("T", " ").slice(0, 16)]);
@@ -1173,7 +1179,7 @@ function rpParams(o, p) {
     rows.push(["Voltage", `${o.min_mv}–${o.max_mv} mV in ${o.mv_step} mV steps` + (o.trim ? "" : " (only raised)")]);
   }
   rows.push(["Tests", `${o.hold_min} min each · sensitivity ${o.sigma}${o.weak === false ? "" : " · easier on noisy chips"}`]);
-  rows.push(["Fans", o.fans === "hold" ? `hold ${o.fan_hold_c} °C · never below ${o.fan_min}%` : "left alone"]);
+  rows.push(["Fans", o.fans === "hold" ? `hold ${o.fan_hold_c} °C on the ${o.hold_on === "chip" ? "hottest chip" : "board sensor"} · never below ${o.fan_min}%` : "left alone"]);
   if (o.mode !== "confirm") rows.push(["Presets", o.presets ? `${o.preset_min} min each${(o.min_mhz || o.preset_min_mhz) ? ` · Lowest at ${o.min_mhz || o.preset_min_mhz} MHz` : ""}${o.fans === "hold" ? ` · up to ${o.preset_max_c} °C` : ""}` : "off"]);
   rows.push(["Safety", `stops at ${o.abort_c} °C`]);
   if (p && p.started) rows.push(["Started", p.started.replace("T", " ").slice(0, 16)]);
@@ -1243,7 +1249,8 @@ function render(s) {
     $("curBar").style.width = Math.min(100, el / hold * 100) + "%";
     $("curProgress").textContent = `${el.toFixed(1)} / ${hold} min`;
     $("kvHash").textContent = `${(+last.total_ths).toFixed(2)} TH/s`;
-    $("kvTemp").textContent = `${last.max_temp} °C` + (last.fan ? `  ·  fan ${last.fan} % → ${last.target_c} °C` : "");
+    const ht = +last.hold_temp, mt = +last.max_temp;
+    $("kvTemp").textContent = `${last.max_temp} °C` + (ht && ht - mt > 0.4 ? `  ·  chips ≈ ${ht.toFixed(0)} °C` : "") + (last.fan ? `  ·  fan ${last.fan} % → ${last.target_c} °C` : "");
     $("kvAll").textContent = `+${last.all_chips_new}` + (+last.board_resets ? `  ·  ${last.board_resets} reset(s)` : "");
     const lim = +last.worst_chip_limit;
     if (last.phase === "baseline" || !lim) {

@@ -55,7 +55,8 @@ then open `http://<this computer's IP>:8787`. Create the login straight away whe
 ## What to report
 
 What you clicked, what you expected, what happened, a screenshot, and your miner model + firmware
-(shown on its Fleet card). The SC Lite tuner is tested on the SC Lite; other models of that form need the
+(shown on its Fleet card). **Settings → App logs → Download app logs** makes a zip of what the app itself
+wrote (addresses, tokens and miner names taken out): attach it, it usually shows what went wrong. The SC Lite tuner is tested on the SC Lite; other models of that form need the
 "allow untested models" box and should be watched closely.
 
 **SC Box / HS Box:** the app sets the clock only (voltage and fans stay as the miner has them).

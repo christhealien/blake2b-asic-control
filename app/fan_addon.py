@@ -54,6 +54,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
+import applog
+if "server" in sys.modules or getattr(sys.modules.get("__main__"), "__file__", "").endswith("server.py"):
+    applog.install("dashboard")        # the dashboard's output, for Settings -> App logs (since 1.19.1)
+
 import fan_controller
 import health_addon
 import schedule_addon
@@ -173,16 +177,26 @@ def _tick_one(self: Any, mid: str, client: Any, profile: dict, offset: int, st: 
         return
     if (profile.get("mode") or "").lower() == "curve" and offset:
         profile, offset = {**profile, "_offset": offset}, 0   # applied (and floored) in target_fan
-    add = chip_offset(mid) if _temp_source(mid) == "chip" else None
+    add, guess = None, False
+    if _temp_source(mid) == "chip":
+        add = chip_offset(mid)
+        if add is None:
+            # the miner's log hasn't been read yet (just started) or is too old: the last gap known, else a careful 8 °C,
+            # so a curve meant for the chips doesn't run on the cooler board sensor meanwhile
+            add, guess = _last_gap.get(mid, CHIP_GAP_GUESS_C), True
+        else:
+            _last_gap[mid] = add
     if add:
         profile = {**profile, "_temp_add": add}
-        st["temp_source"] = f"hottest chip (board sensor +{add:.1f} °C)"
+        st["temp_source"] = f"hottest chip (board sensor +{add:.1f} °C{', until the miner log is read' if guess else ''})"
     else:
         st.pop("temp_source", None)
     _orig_tick_one(self, mid, client, profile, offset, st)
 
 
 _src_cache: dict[str, tuple[float, str]] = {}
+_last_gap: dict[str, float] = {}
+CHIP_GAP_GUESS_C = 8.0
 
 
 def _temp_source(mid: str) -> str:
@@ -448,6 +462,7 @@ def import_presets() -> list[str]:
             mine[key] = {
                 "label": label, "mhz": e.get("mhz"), "mv": e.get("mv"), "pv": e.get("pv"),
                 **({"box": True} if e.get("box") else {}),
+                **({"hold_on": "chip"} if pdoc.get("hold_on") == "chip" and fan_key else {}),
                 "fan_profile": fan_key, "source": "tuner", "ok": bool(e.get("ok")),
                 "target_c": e.get("target_c"), "avg_fan": e.get("avg_fan"), "avg_ths": e.get("avg_ths"),
                 "max_t": e.get("max_t"), "watched_min": e.get("watched_min"),
@@ -473,6 +488,8 @@ def import_presets() -> list[str]:
             if high.get("fan_profile"):
                 fc = dict(row.get("fan_control") or {})
                 fc.update(enabled=True, profile=high["fan_profile"], fan_offset=0)
+                if high.get("hold_on") == "chip":
+                    fc["temp_source"] = "chip"      # its curve was measured on the hottest chip
                 row["fan_control"] = fc
         done.append(mid)
         if pdoc.get("box"):
@@ -678,6 +695,8 @@ def apply_preset(body: dict[str, Any]) -> dict[str, Any]:
             if p.get("fan_profile"):
                 fc = dict(m.get("fan_control") or {})
                 fc.update(enabled=True, profile=p["fan_profile"], fan_offset=0)   # the preset's own curve, unshifted
+                if p.get("hold_on") == "chip":
+                    fc["temp_source"] = "chip"      # its curve was measured on the hottest chip
                 m["fan_control"] = fc
     srv.save_registry_doc(doc)
     return {"ok": True, "plan": s["manualPowerplan"], "fan_profile": p.get("fan_profile")}
@@ -2200,7 +2219,102 @@ def set_scale(body: dict[str, Any]) -> dict[str, Any]:
     return scale_state()
 
 
+# ---------------------------------------------------------------- app logs (Settings -> App logs, since 1.19.1)
+
+LOG_TAIL = 1_500_000          # at most this much of each file goes in (the newest part)
+
+
+def logs_zip() -> tuple[str, bytes]:
+    """The app's own logs (dashboard, widgets, each miner's tuner log) and a short description of the setup, as a
+    zip for sending with a problem report. IP and MAC addresses, web and pool addresses, e-mail addresses, anything
+    token-like and the miners' names and ids are taken out (report_addon's filters); passwords are never logged."""
+    import io
+    import os
+    import platform
+    import zipfile
+    doc = _srv().load_registry_doc()
+    miners = [m for m in doc.get("miners") or [] if not m.get("demo")]
+    names: list[tuple[str, str]] = []
+    for i, m in enumerate(miners, 1):
+        for v in {str(m.get("name") or ""), _row_id(m), tuner_addon.safe_id(_row_id(m))}:
+            if len(v) >= 3:
+                names.append((v, f"miner-{i}"))
+    names.sort(key=lambda kv: -len(kv[0]))
+
+    def clean(text: str) -> str:
+        text = report_addon.scrub_text(text)
+        for v, alias in names:
+            text = text.replace(v, alias)
+        return text
+
+    def tail(p: Any) -> str:
+        with open(p, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - LOG_TAIL))
+            data = f.read().decode("utf-8", "replace")
+        return ("(older lines cut)\n" + data.split("\n", 1)[-1]) if size > LOG_TAIL else data
+
+    about = [f"Blake2b ASIC Control {os.environ.get('B2AC_VERSION', '?')} · app logs made {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
+             f"platform: {os.environ.get('B2AC_PLATFORM') or ('umbrel' if os.environ.get('SCLITE_BEHIND_PROXY') else 'docker / local')}"
+             f" · Python {platform.python_version()} · {platform.system()} {platform.machine()}",
+             f"time zone: {doc.get('timezone') or 'UTC'}", "", "miners (names and addresses left out):"]
+    for i, m in enumerate(miners, 1):
+        hw = m.get("hardware") or {}
+        mid = _row_id(m)
+        sch = (doc.get("schedules") or {}).get(mid) or {}
+        about.append(f"  miner-{i}: {hw.get('name') or hw.get('model') or 'not probed'} · fw {hw.get('firmware') or '?'} · "
+                     f"profile {hw.get('profile') or '?'} · plan {hw.get('plan_format') or '?'} · probe {'ok' if hw.get('ok') else 'failed: ' + str(hw.get('error') or '')[:80]}"
+                     f" · preset {m.get('active_preset') or 'none'} · auto fan {'on' if (m.get('fan_control') or {}).get('enabled') else 'off'}"
+                     f"{' (' + str((m.get('fan_control') or {}).get('temp_source')) + ')' if (m.get('fan_control') or {}).get('temp_source') else ''}"
+                     f" · schedule {'paused' if sch.get('paused') else 'on' if sch.get('enabled') else 'off'}"
+                     f" · {'TUNING' if tuner_addon.running(mid) else 'not tuning'}")
+    files: dict[str, str] = {"about.txt": clean("\n".join(about) + "\n")}
+    d = applog.log_dir()
+    for nm in ("dashboard.log.1", "dashboard.log", "widgets.log.1", "widgets.log"):
+        p = d / nm
+        if p.is_file():
+            try:
+                files[nm.replace(".log.1", ".older.log")] = clean(tail(p))
+            except OSError as e:
+                files[nm + ".error.txt"] = f"couldn't read it: {e}"
+    if not any(k.startswith("dashboard") for k in files):
+        files["dashboard.log.missing.txt"] = ("No dashboard log on disk yet: it's kept from 1.19.1 on, starting with the app's next start.\n")
+    for i, m in enumerate(miners, 1):
+        f = tuner_addon.Files(_row_id(m))
+        if f.log.is_file():
+            try:
+                # each run's first line names the miner as it was then (maybe renamed since): take that name out too
+                files[f"tuner-miner-{i}.log"] = re.sub(r"(started from dashboard \S+ \S+ miner ).*?( \()", rf"\g<1>miner-{i}\g<2>",
+                                                       clean(tail(f.log)))
+            except OSError:
+                pass
+    files["README.txt"] = ("Blake2b ASIC Control app logs, for finding problems with the app.\n\n"
+                           "  about.txt          the app version, platform and each miner's model, firmware and state\n"
+                           "  dashboard.log      what the dashboard printed (with older lines in dashboard.older.log)\n"
+                           "  widgets.log        the Umbrel home-screen widgets\n"
+                           "  tuner-miner-N.log  each miner's tuning runs\n\n"
+                           "Taken out of everything: IP and MAC addresses, web and pool addresses, e-mail addresses, anything that "
+                           "looks like a token or a wallet, and the miners' names (they're miner-1, miner-2, ...). The miners' "
+                           "passwords are never written to the logs. It's plain text: look through it before you send it.\n")
+    buf = io.BytesIO()
+    stamp = time.strftime("%Y%m%d-%H%M")
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for nm, text in files.items():
+            z.writestr(f"b2ac-logs-{stamp}/{nm}", text)
+    return f"b2ac-logs-{stamp}.zip", buf.getvalue()
+
+
 def handle_get(handler: Any, path: str, json_response: Callable) -> bool:
+    if path == "/api/settings/logs/download":
+        try:
+            name, data = logs_zip()
+        except Exception as e:
+            json_response(handler, 500, {"ok": False, "error": f"couldn't make the logs zip: {type(e).__name__}: {e}"[:200]})
+            return True
+        print(f"[logs] app logs downloaded ({len(data) // 1024} KB)", flush=True)
+        tuner_addon._send_file(handler, data, name, "application/zip")
+        return True
     if path in notify_addon.ROUTES_GET:
         json_response(handler, 200, notify_addon.ROUTES_GET[path]())
         return True

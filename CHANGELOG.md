@@ -3,6 +3,53 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.19.1 (2026-10-16)
+
+**Tuner: a steadier fan hold, and holding the chips.** Prompted by a run on a new SC Lite (stock 615 MHz).
+- **The swing:** that run's fans swung between 20 % and 100 % every few minutes. Holding 70 °C on the board sensor,
+  the boards went from 54 °C to 79 °C and back, and the hottest chips reached 86 °C in the miner's own log just
+  before its mining software restarted.
+- **Why:** while the boards cooled, the integral of the fan hold built up a large "too cold" correction (up to −60 %).
+  That held the fans at their floor until a board was 8 °C over, and then full fan cooled it far below the target
+  again.
+
+The fixes:
+- **Fan hold rework** (`asic_tuner.FanHold`):
+  - The integral only grows while the fan isn't pinned at its limit in that direction, and stays within ±25 %
+    (anti-windup).
+  - The fan comes down at most 2 % a reading, and not at all while the temperature is still rising. It goes up 5 %
+    a reading, or 10 % when more than 3 °C over.
+  - Full fan still starts at 8 °C over. When it ends, the fan goes back to the level it last held steadily, not to
+    the floor.
+  - Gains: KP 3, KI 0.3.
+  - Tested in a simulation of a miner whose temperature follows the fan a few readings late. The old settings
+    swung 20–100 % / 57–86 °C there, as on the real run; the new ones hold within about 1–2 °C.
+- **Hold on the hottest chip** (`--hold-on chip`, the default for new runs; Tuner page *Hold on*).
+  - The hold steers on the board sensor plus how much hotter the hottest chip runs, read from the miner's own log
+    (its Chip Avgtemp / MaxTemp / CpbTemp lines) at the start and every 10 minutes.
+  - A chip estimate at the abort temperature + 2 °C stops the run. The live readings, log and Tuner page show it
+    ("chips ≈ 80 °C").
+  - Presets built on chip temperatures switch the miner's auto fan to "hottest chip" when applied, so their curves
+    run on what they were measured on.
+  - A rebuild holds what its search held. *Board sensor* keeps the old behaviour (pick a target about 8 °C lower
+    for the same chips).
+- **Restarts that look like heat:** a test that fails because the miner restarted now says so when the hottest
+  reading was within 6 °C of the abort temperature ("so it may have stopped for heat").
+- **Fleet auto fan on "hottest chip":** until the miner's log has been read (just after the app starts, or when
+  the last read is over an hour old), it adds the last gap it knew, or 8 °C, instead of falling back to the bare
+  board sensor. Before, it ran cooler-reading than the curve meant.
+
+**Settings → App logs** (`applog.py`, `fan_addon.logs_zip`, route `GET /api/settings/logs/download`).
+- **What's kept:** the dashboard and the widget server copy what they print into `<data>/logs/dashboard.log` and
+  `widgets.log`, with a time on each line. Uncaught errors are logged with their traceback, in threads too.
+- **Size:** each file is kept under 2 MB, with one older copy (`.log.1`).
+- **The download:** a zip of these logs (the newest 1.5 MB of each), each miner's tuner log, and `about.txt`
+  (app version, platform, time zone, and each miner's model, firmware, probe state, preset, auto fan, schedule
+  and tuning state).
+- **Privacy:** IP and MAC addresses, web and pool addresses, e-mail addresses and token- or wallet-like text are
+  taken out (the same filters as Download report). The miners' names and ids, including old names in tuner logs,
+  are replaced by miner-1, miner-2, …. Passwords are never logged.
+
 ## 1.19.0 (2026-10-14)
 
 - **A new Pools page** (`addon.js`, `buildPools` / `renderPools`). The dashboard's batch forms are kept in the page (its

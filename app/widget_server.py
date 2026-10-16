@@ -419,6 +419,11 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    try:
+        import applog
+        applog.install("widgets")      # for Settings -> App logs (since 1.19.1)
+    except Exception as e:
+        print(f"[log] not kept on disk: {e}", flush=True)
     threading.Thread(target=_poll_forever, daemon=True).start()
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"[widgets] serving on :{PORT} (polling miners every {POLL_S:g} s)", flush=True)

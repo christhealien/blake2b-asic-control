@@ -108,7 +108,7 @@ RESULTS_HEADER = ["time", "mhz", "mv", "pv", "result", "reason", "watched_min",
                   "all_chips_new", "board_resets", "avg_ths", "max_temp"]
 LIVE_HEADER = ["time", "phase", "mhz", "mv", "pv", "elapsed_min", "hold_min",
                "worst_chip", "worst_chip_new", "worst_chip_limit",
-               "all_chips_new", "board_resets", "total_ths", "max_temp", "fan", "target_c"]
+               "all_chips_new", "board_resets", "total_ths", "max_temp", "fan", "target_c", "hold_temp"]
 CHIPS_HEADER = ["time", "mhz", "mv", "pv", "result", "watched_min", "board", "chip",
                 "new_hw", "baseline_per_hour", "limit"]
 
@@ -371,12 +371,26 @@ def apply_plan(plan: Plan) -> None:
 
 
 class FanHold:
-    """Holds the hottest board at a target temperature by setting the fan (PI control).
+    """Holds the hottest reading at a target temperature by setting the fan (PI control).
 
     Called once per reading (every --poll-s). The stock firmware slowly walks the fan back,
-    so the value is re-sent at least every RESEND_S even when it hasn't changed."""
-    KP = 4.0        # fan % per degree above target
-    KI = 0.6        # fan % added per reading per degree (slowly removes a steady offset)
+    so the value is re-sent at least every RESEND_S even when it hasn't changed.
+
+    Since 1.19.1 (a run on an SC Lite swung between 20 % and 100 % every few minutes, the chips reaching
+    86 C before the miner's software restarted):
+      - anti-windup: the integral only grows while the fan isn't already pinned at its limit in that
+        direction, and is kept within +-25 %, so minutes at the floor can't hold the fan down later;
+      - gentler: the fan comes down at most DOWN_STEP % a reading, and not at all while the temperature is
+        still rising; it goes up UP_STEP (2x when more than 3 C over);
+      - full fan from FULL_AT C over the target, as before, and when it leaves full fan it drops to the level
+        it last held steadily, not to the floor."""
+    # tuned in a simulation of a miner whose temperature follows the fan a few readings late (as the SC Lite run
+    # did): the old settings swung 20-100 % / 57-86 C there, these hold within about 1-2 C
+    KP = 3.0        # fan % per degree above target
+    KI = 0.3        # fan % added per reading per degree (slowly removes a steady offset)
+    I_MAX = 25.0
+    UP_STEP, DOWN_STEP = 5, 2
+    FULL_AT = 8.0
     RESEND_S = 60.0
 
     def __init__(self, target: float, fan_min: int, fan_max: int = 100):
@@ -387,11 +401,43 @@ class FanHold:
         self.fan: int | None = None
         self.sent = 0.0
         self.samples: list[int] = []
+        self.last_t: float | None = None
+        self.full = False
+        self.steady: int | None = None      # the fan it last held without going full
 
     def set_target(self, target: float) -> None:
         if float(target) != self.target:
             log(f"fans: now holding {target:g} C")
         self.target = float(target)
+
+    def want(self, temp: float) -> int:
+        """The next fan % for this reading (no I/O: unit-testable)."""
+        cur = self.fan if self.fan is not None else int(self.base or 70)
+        err = temp - self.target
+        rising = self.last_t is not None and temp > self.last_t + 0.2
+        self.last_t = temp
+        if err >= self.FULL_AT:
+            self.full = True
+            return self.fan_max                     # far too hot: full fan now
+        if self.full:                               # coming off full fan: back to where it held before
+            self.full = False
+            self.i = 0.0
+            back = self.steady if self.steady is not None else int(self.base or cur)
+            return int(max(self.fan_min, min(self.fan_max, max(back, cur - 3 * self.DOWN_STEP))))
+        at_min, at_max = cur <= self.fan_min, cur >= self.fan_max
+        if abs(err) > 0.5 and not ((at_min and err < 0) or (at_max and err > 0)):
+            self.i = max(-self.I_MAX, min(self.I_MAX, self.i + self.KI * err))
+        w = (self.base or cur) + self.KP * err + self.i
+        if w > cur:
+            w = min(cur + (2 * self.UP_STEP if err > 3 else self.UP_STEP), w)
+        elif rising:
+            w = cur                                 # still warming: don't take fan away
+        else:
+            w = max(cur - self.DOWN_STEP, w)
+        w = int(round(max(self.fan_min, min(self.fan_max, w))))
+        if abs(err) <= 1.5:
+            self.steady = w
+        return w
 
     def tick(self, temp: float | None) -> None:
         if temp is None:
@@ -400,17 +446,7 @@ class FanHold:
             _m, _v, fa, _fb, _pv = sc.parse_plan(str(patient(sc.get_setting, "read fan").get("manualPowerplan")))
             self.base = float(max(self.fan_min, min(self.fan_max, fa or 70)))
             self.fan = int(self.base)
-        err = temp - self.target
-        if abs(err) > 0.5:
-            self.i = max(-60.0, min(60.0, self.i + self.KI * err))
-        want = self.base + self.KP * err + self.i
-        cur = self.fan if self.fan is not None else int(self.base)
-        if err >= 8:
-            want = self.fan_max            # far too hot: full fan now (not limited to one step up)
-        else:
-            step = 20 if err > 3 else 10   # faster up than down
-            want = max(cur - 10, min(cur + step, want))
-        want = int(round(max(self.fan_min, min(self.fan_max, want))))
+        want = self.want(temp)
         if want != self.fan or time.time() - self.sent >= self.RESEND_S:
             self.send(want)
         self.samples.append(self.fan if self.fan is not None else want)
@@ -425,6 +461,31 @@ class FanHold:
             sc.put_setting(payload)
         patient(write, f"set fan {fan}")
         self.fan, self.sent = fan, time.time()
+
+
+# -------------------------------------------------- the hottest chip, from the miner's log ---
+
+CHIP_REFRESH_S = 600.0     # how often the chip / board gap is read again from the miner's log
+
+
+def chip_gap() -> float | None:
+    """How much hotter the hottest chip runs than the hottest board sensor, from the miner's own log
+    (its "Chip Avgtemp / MaxTemp / CpbTemp" lines), 0-15 C; None if the log can't be read or has none."""
+    try:
+        try:
+            import health_addon        # the dashboard's log parser (in ../webui)
+        except ImportError:
+            sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "webui"))
+            import health_addon
+        raw = sc.api("GET", "/dbg/minersyslog")
+        if isinstance(raw, dict):
+            raw = raw.get("body") or raw.get("data") or ""
+        if not isinstance(raw, str) or not raw:
+            return None
+        off = health_addon.chip_temp_offset(health_addon.parse(raw))
+        return None if off is None else max(0.0, min(15.0, float(off)))
+    except Exception:
+        return None
 
 
 # ----------------------------------------------------------------- testing ---
@@ -466,6 +527,10 @@ class Tester:
         self.applied_ok = 0
         self.notes: list[str] = []
         self.fans = FanHold(a.fan_hold_c, a.fan_min) if a.fan_hold_c > 0 else None
+        self.chip_on = getattr(a, "hold_on", "board") == "chip"
+        self.gap: float | None = None      # hottest chip minus hottest board sensor (miner's log)
+        self.gap_at = 0.0
+        self.hold_t: float | None = None   # what the fan hold and the chip abort look at
 
     def false_fail(self) -> float:
         """The chance a clean test still fails somewhere by bad luck (5 % at the default sensitivity 2.5;
@@ -500,8 +565,24 @@ class Tester:
             self._no_t = 0
         if t is not None and t >= self.a.abort_c:
             raise Abort(f"board reached {t:.1f} C (abort at {self.a.abort_c} C)")
+        hold = t
+        if self.chip_on and t is not None:
+            if time.time() - self.gap_at >= CHIP_REFRESH_S:
+                g = chip_gap()
+                self.gap_at = time.time()
+                if g is not None:
+                    if self.gap is None:
+                        log(f"hottest chip runs {g:.1f} C above the board sensor (miner's log): the fans hold the chips")
+                    self.gap = g
+            if self.gap is not None:
+                hold = t + self.gap
+                if hold >= self.a.abort_c + 2:
+                    raise Abort(f"the hottest chip reached about {hold:.1f} C (board {t:.1f} C + {self.gap:.1f} C from the "
+                                f"miner's log; abort at {self.a.abort_c} C + 2 for chips)")
+        self.hold_t = hold
+        snap["hold_t"] = hold
         if self.fans:
-            self.fans.tick(t)
+            self.fans.tick(hold)
         return snap
 
     def settle(self, plan: Plan, minutes: float | None = None) -> None:
@@ -561,7 +642,10 @@ class Tester:
             if up is not None and born0 is not None and (time.time() - up) > born0 + 90:
                 # the mining software restarted: its error counters started again from zero, so the
                 # test can't be judged clean (and a setting that crashes the miner isn't one to keep)
-                return False, f"the miner restarted during the test (its mining software has been up only {up:.0f} s)", {
+                hot = max_t + (self.gap or 0) if max_t else None
+                heat = (f"; the hottest {'chip' if self.gap else 'board'} was about {hot:.0f} C just before, so it may have "
+                        "stopped for heat" if hot and hot >= self.a.abort_c - 6 else "")
+                return False, f"the miner restarted during the test (its mining software has been up only {up:.0f} s){heat}", {
                     "gained": dict(gained), "limits": dict(limits), "worst": max(gained, key=lambda k: gained[k]) if gained else None,
                     "total": sum(gained.values()), "resets": board_resets, "watched_min": (time.time() - start) / 60.0,
                     "hold_min": hold_min, "avg_ths": (sum(hr) / len(hr)) if hr else 0.0, "max_t": max_t,
@@ -600,10 +684,12 @@ class Tester:
                 now(), phase, plan.mhz, plan.mv, plan.pv, f"{elapsed_min:.1f}", f"{hold_min:g}",
                 chip_name(worst), gained[worst], f"{limits[worst]:.1f}" if judge else "",
                 total, board_resets, f"{hr[-1]:.3f}", snap.get("max_t"),
-                self.fans.fan if self.fans else "", f"{self.fans.target:g}" if self.fans else ""])
+                self.fans.fan if self.fans else "", f"{self.fans.target:g}" if self.fans else "",
+                f"{snap.get('hold_t'):.1f}" if isinstance(snap.get("hold_t"), (int, float)) else ""])
             top = sorted(gained, key=lambda k: -gained[k])[:3]
             log(f"  {phase} {elapsed_min:5.1f}/{hold_min:g} min  {hr[-1]:.2f} TH/s  "
                 f"maxT={snap.get('max_t')}"
+                + (f" chip~{snap['hold_t']:.1f}" if self.gap is not None and isinstance(snap.get("hold_t"), (int, float)) else "")
                 + (f" fan={self.fans.fan}%->{self.fans.target:g}C" if self.fans else "")
                 + f"  all chips +{total}  top: "
                 + ", ".join(f"{chip_name(k)} +{gained[k]}" for k in top))
@@ -937,7 +1023,8 @@ def build_presets(a: argparse.Namespace, tester: "Tester", base: Plan, best: Pla
     doc = {"run": a.run_id, "created": now(), "complete": False, "fan_hold_c": hold,
            "fan_min": a.fan_min, "preset_min": a.preset_min, "presets": {},
            "mode": "presets" if getattr(a, "presets_only", False) else "search",
-           "source": getattr(a, "source_label", "") or None}
+           "source": getattr(a, "source_label", "") or None,
+           "hold_on": getattr(a, "hold_on", "board") if hold else None}
     write_presets(doc)
     log(f"PRESETS: testing each for {a.preset_min:g} min"
         + (f", held at {', '.join(f'{temps[k]} C' for k, _ in PRESET_ORDER)}" if hold else ""))
@@ -1050,6 +1137,9 @@ def main() -> None:
     ap.add_argument("--fan-hold-c", type=float, default=0,
                     help="take over the fans and hold the hottest board at this C (0 = never touch fans)")
     ap.add_argument("--fan-min", type=int, default=30, help="lowest fan %% while holding a temperature")
+    ap.add_argument("--hold-on", choices=("board", "chip"), default="board",
+                    help="what the fan hold steers on: the hottest board sensor, or the hottest chip (board + the gap the "
+                         "miner's log shows; read again every 10 min). chip also stops the run at --abort-c + 2 on chips")
     ap.add_argument("--fan-settle-min", type=float, default=5,
                     help="minutes to settle when the held temperature changes (baseline, each preset)")
     ap.add_argument("--presets", action="store_true",
@@ -1161,7 +1251,7 @@ def main() -> None:
     log(f"       {LIVE_CSV}")
     log(f"       {CHIPS_CSV}")
     if tester.fans:
-        log(f"fans: holding the hottest board at {a.fan_hold_c:g} C (fan never below {a.fan_min}%)")
+        log(f"fans: holding the hottest {'chip' if a.hold_on == 'chip' else 'board'} at {a.fan_hold_c:g} C (fan never below {a.fan_min}%)")
     else:
         log("fans are never changed")
     log(f"stopping puts the miner back on {pre.text()} (what it ran before)"

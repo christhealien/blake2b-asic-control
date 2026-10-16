@@ -1396,6 +1396,20 @@
     $("tzSave").onclick = () => save($("tzIn").value.trim());
   }
 
+  // Settings: the app's own logs, for finding problems with the app (since 1.19.1)
+  function buildLogs() {
+    const view = $("viewSettings"); if (!view || $("sclLogs")) return;
+    const panel = document.createElement("div"); panel.className = "panel compact"; panel.id = "sclLogs";
+    panel.innerHTML = `<div class="row" style="justify-content:space-between;gap:.5rem;flex-wrap:wrap"><h2 style="margin:0">App logs</h2>
+        <a class="btn-like" id="sclLogsDl" href="/api/settings/logs/download" download><button type="button" class="primary">Download app logs (.zip)</button></a></div>
+      <p class="muted" style="margin:.4rem 0 0;font-size:.85rem">What Blake2b ASIC Control itself wrote: the dashboard, the home-screen widgets and each
+        miner's tuning runs, plus a list of your miners' models, firmware and state. Send it with a problem report to find what went wrong.
+        IP and MAC addresses, pool and web addresses, e-mail addresses and anything that looks like a token or a wallet are taken out, and
+        your miners are named miner-1, miner-2, …; their passwords are never logged. It's plain text: look it over before sending.
+        The app keeps about the last 4 MB of each log.</p>`;
+    view.appendChild(panel);
+  }
+
   // Settings: how best shares are shown (like DATUM and mempool, the miner's own number, or both)
   function buildScale() {
     const view = $("viewSettings"); if (!view || $("sclScale")) return;
@@ -1736,7 +1750,7 @@
   if ($("tabBatch")) $("tabBatch").addEventListener("click", () => setTimeout(renderPools, 0));
   setInterval(renderPools, 3000);
 
-  buildQuickBar(); buildDetail(); buildPools(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildScale(); buildRef();
+  buildQuickBar(); buildDetail(); buildPools(); buildDemo(); tidySettings(); buildAccount(); buildNotify(); buildTz(); buildScale(); buildLogs(); buildRef();
   loadNotify().then(() => updateDetailInfo());
   loadHw(); setInterval(loadHw, 15000);
   let lastDetail = null;

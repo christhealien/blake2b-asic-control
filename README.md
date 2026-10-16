@@ -32,7 +32,9 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   one runs cleanly, judging every chip against its own normal error rate while holding the boards at a
   temperature you choose. It confirms the winner and builds and tests the four presets, each with its
   own fan curve. **Rebuild the presets** tests them again from the last search's curve (for example at
-  another temperature) in a few hours instead of a day. Several miners can tune at once. Its files can be
+  another temperature) in a few hours instead of a day. Several miners can tune at once. The fans can hold
+  the **hottest chip** (the board sensor plus the gap the miner's own log shows) rather than the cooler
+  board sensor. Its files can be
   downloaded with private details taken out, for sending to someone helping you.
   The **SC Box and HS Box** get a clock tuner: it learns every chip's normal error rate, steps the clock
   up 25 MHz at a time until a step isn't clean, confirms the fastest clean clock, then builds and tests
@@ -309,6 +311,9 @@ Everything that changes is in the app's data folder (on Umbrel
 - `tuner/<miner id>/`: that miner's `asic_tuner_*` results, live readings, chip errors, presets, run
   plan, every run's options, what the last rebuild was built from, and the log, all downloadable from
   the Tuner page (one at a time or as a zip).
+- `logs/`: the app's own logs since 1.19.1 (`dashboard.log`, `widgets.log`, each kept under about 2 MB with
+  one older copy). **Settings → App logs** downloads them with each miner's tuner log and a list of the
+  miners' models and firmware, with addresses, tokens and the miners' names taken out.
 
 ## Layout
 

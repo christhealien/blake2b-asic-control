@@ -434,7 +434,7 @@ def search_source(mid: Any) -> dict[str, Any]:
         "max_mv": int(opts.get("max_mv") or max(tested_mv + [base["mv"]])),
         "hold_c": hold_c,
         "options": {k: opts.get(k) for k in ("fan_hold_c", "fan_min", "preset_max_c", "preset_min", "sigma",
-                                              "abort_c", "weak", "fans") if k in opts},
+                                              "abort_c", "weak", "fans", "hold_on") if k in opts},
         "last_temps": prev_temps if all(isinstance(t, (int, float)) for t in prev_temps) else None,
         "last_presets_mode": prev.get("mode") or "search",
         "rows": len(seg),
@@ -506,8 +506,11 @@ def _start_presets(row: dict[str, Any], body: dict[str, Any], mid: str, ip: str,
         opts["preset_temps"] = temps
         # the fresh baseline is held where the search held it, so the error rates compare like for like
         opts["fan_hold_c"] = float(src.get("hold_c") or temps[0])
+        # a rebuild holds what the search held (its temperatures mean that), unless you pick
+        src_on = (src.get("options") or {}).get("hold_on") or "board"
+        opts["hold_on"] = body.get("hold_on") if body.get("hold_on") in ("board", "chip") else src_on
         args += ["--fan-hold-c", f"{opts['fan_hold_c']:g}", "--fan-min", str(opts["fan_min"]),
-                 "--preset-temps", ",".join(f"{t:g}" for t in temps)]
+                 "--preset-temps", ",".join(f"{t:g}" for t in temps), "--hold-on", opts["hold_on"]]
     else:
         opts["fan_hold_c"] = 0
     f = Files(mid)
@@ -702,6 +705,9 @@ def _start(row: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
         if opts["fan_hold_c"] > opts["abort_c"] - 10:
             raise RuntimeError("the target temperature must be at least 10 °C below the abort temperature")
         args += ["--fan-hold-c", f"{opts['fan_hold_c']:g}", "--fan-min", str(opts["fan_min"])]
+        # what the hold steers on: the hottest chip (board + the gap in the miner's log; default since 1.19.1) or the board
+        opts["hold_on"] = "board" if body.get("hold_on") == "board" else "chip"
+        args += ["--hold-on", opts["hold_on"]]
     else:
         opts["fan_hold_c"] = 0
     # presets (search only)
