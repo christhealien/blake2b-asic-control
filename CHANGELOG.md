@@ -3,6 +3,20 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.20.0 (2026-10-16)
+
+- **Edit a pool (Pools page):** every pool in "2 · Their pools" has an **Edit** button that opens a form right
+  there: pool address, payout address, worker name (filled in from what the miner has) and password (left empty
+  = unchanged). Save changes that one pool of that one miner and keeps its place in the list; "restart the miner
+  now" (ticked for the pool it mines on) restarts it so the mining software uses the change. The form isn't
+  redrawn by the page's refresh while it's open, so nothing typed is lost.
+- **How it's written** (`fan_addon.edit_pool`, `POST /api/pools/edit`): the miner's whole pool list with the one
+  entry changed (`PUT /mcb/pools`, the same call the dashboard uses to reorder pools), read back. If a firmware
+  ignores an edited entry that way, the app adds the new pool, moves it to the old one's place and removes the old
+  one, and reads that back too; a password-only change that the firmware doesn't take this way is reported
+  instead. Refused while the miner is being tuned, for an address the miner lists twice, or for a change that
+  would duplicate another of its pools.
+
 ## 1.19.3 (2026-10-16)
 
 - **Refresh stays on your tab:** the address now follows the tab you're on (`/#fleet`, `/#pools`, `/#settings`,

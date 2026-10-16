@@ -1659,17 +1659,20 @@
       const sn = m.snapshot || {}, wp = sn.working_pool || {}, pools = sn.pools || [], busy = (HW[m.id] || {}).tuning;
       const body = pools.map(p => {
         const mining = String(p.id) === String(wp.id), u = userBits(p.user);
+        if (plEdit && plEdit.id === m.id && plEdit.url === String(p.url)) return plForm(m, p, mining);
         return `<div class="scl-pl-p"><div class="scl-pl-pl"><div><span class="muted mono">P${esc(p.id)}</span> <span class="mono scl-pl-host">${esc(hostOf(p.url))}</span>
             ${mining ? '<span class="pill ok">mining</span>' : p.status === "Alive" ? '<span class="muted">ready</span>' : `<span style="color:var(--warn)">${esc(String(p.status || "down").toLowerCase())}</span>`}</div>
           <div class="muted" style="font-size:.78rem"><span class="mono" title="${esc(p.user || "")}">${esc(shortAddr(u.addr))}${u.worker ? `.<b style="color:var(--text)">${esc(u.worker)}</b>` : ""}</span>${p.accepted != null ? ` · ${(+p.accepted).toLocaleString()} accepted` : ""}${p.rejected ? ` · ${(+p.rejected).toLocaleString()} rejected` : ""}</div></div>
-          <div class="scl-pl-pb">${mining ? "" : `<button type="button" data-plfirst="${esc(m.id)}" data-url="${esc(p.url)}" ${busy ? "disabled" : ""} title="Make this the first pool and restart the miner, so it mines here">Switch to it</button>`}
+          <div class="scl-pl-pb"><button type="button" data-pledit="${esc(m.id)}" data-url="${esc(p.url)}" ${busy ? "disabled" : ""} title="Change this pool's address, payout address, worker name or password">Edit</button>${mining ? "" : `<button type="button" data-plfirst="${esc(m.id)}" data-url="${esc(p.url)}" ${busy ? "disabled" : ""} title="Make this the first pool and restart the miner, so it mines here">Switch to it</button>`}
             <button type="button" class="danger" data-pldel="${esc(m.id)}" data-url="${esc(p.url)}" data-mining="${mining ? 1 : ""}" ${pools.length < 2 ? "disabled title='Its only pool'" : ""}>Remove</button></div></div>`;
       }).join("");
       return `<div class="scl-pl-m"><h3>${esc(m.name)} <span class="muted mono" style="font-size:.75rem;font-weight:400">${esc(m.ip)}</span></h3>${pools.length
         ? body
         : `<span class="muted">${sn.ok === false ? "Offline: its pools can't be read." : "No pools reported yet."}</span>`}</div>`;
     }).join("") : "Tick a miner above to see its pools.";
-    if ($("sclPlLists")._last !== lists) { $("sclPlLists").innerHTML = lists; $("sclPlLists")._last = lists; $("sclPlLists").className = sel.length ? "" : "muted"; }
+    if (plEdit && !sel.some(m => m.id === plEdit.id)) plEdit = null;          // its miner was unticked
+    const typing = plEdit && $("sclPlEdit") && $("sclPlLists")._edit === plEdit.key;   // keep what's being typed
+    if (!typing && $("sclPlLists")._last !== lists) { $("sclPlLists").innerHTML = lists; $("sclPlLists")._last = lists; $("sclPlLists")._edit = plEdit && plEdit.key; $("sclPlLists").className = sel.length ? "" : "muted"; }
     const n = sel.length;
     $("sclPlAddN").textContent = n ? `the ${n} ticked miner${n > 1 ? "s" : ""}` : "the ticked miners";
     $("sclPlAdd").textContent = n ? `Add to ${n} miner${n > 1 ? "s" : ""}` : "Add pool";
@@ -1687,6 +1690,55 @@
     if (bs._last !== html && document.activeElement !== bs) { bs.innerHTML = html; bs._last = html; if ([...bs.options].some(o => o.value === keep)) bs.value = keep; }
     ["sclPlBulkFirst", "sclPlBulkDel"].forEach(i => $(i).disabled = !opts);
   }
+  let plEdit = null;     // {id, url, key}: the pool whose edit form is open
+  function plForm(m, p, mining) {
+    const u = userBits(p.user);
+    return `<div class="scl-pl-p" id="sclPlEdit" style="display:block">
+      <div class="muted" style="font-size:.8rem">Editing <span class="mono">P${esc(p.id)} ${esc(hostOf(p.url))}</span>${mining ? ' <span class="pill ok">mining</span>' : ""}</div>
+      <div class="scl-pl-form" style="margin:.4rem 0">
+        <label>Pool address<input id="sclPeUrl" value="${esc(p.url)}" autocomplete="off" /></label>
+        <label>Payout address<input id="sclPeAddr" value="${esc(u.addr)}" autocomplete="off" /></label>
+        <label>Worker name<input id="sclPeWorker" value="${esc(u.worker)}" autocomplete="off" placeholder="none" /></label>
+        <label>Password<input id="sclPePass" autocomplete="off" placeholder="unchanged" /></label>
+      </div>
+      <label class="check" style="font-size:.85rem"><input type="checkbox" id="sclPeRestart" ${mining ? "checked" : ""} /> restart the miner now so it uses the change (hashing pauses about a minute)</label>
+      <div class="muted" style="font-size:.78rem;margin:.2rem 0 .4rem">The miner keeps this pool in the same place in its list. Its mining software only reads the change when it restarts.</div>
+      <div class="row" style="gap:.4rem"><button type="button" class="primary" id="sclPeSave">Save</button><button type="button" id="sclPeCancel">Cancel</button><span class="muted" id="sclPeNote" style="font-size:.85rem"></span></div>
+    </div>`;
+  }
+  function plOpenEdit(id, url) {
+    plEdit = { id, url: String(url), key: id + "|" + url };
+    $("sclPlLists")._last = null; $("sclPlLists")._edit = null;
+    renderPools();
+    const f = $("sclPeUrl"); if (f) f.focus();
+  }
+  function plCloseEdit() { plEdit = null; $("sclPlLists")._last = null; renderPools(); }
+  async function plSave() {
+    if (!plEdit) return;
+    const { id, url } = plEdit;
+    const nu = $("sclPeUrl").value.trim(), addr = $("sclPeAddr").value.trim(), w = $("sclPeWorker").value.trim();
+    const pw = $("sclPePass").value.trim(), restart = $("sclPeRestart").checked;
+    if (!nu || !addr) return toast("Give the pool address and the payout address", true);
+    if (!confirm(`Change this pool on ${nameOf(id)}?\n\n${hostOf(url)}  →  ${hostOf(nu) || nu}\nlogin: ${addr}${w ? "." + w : ""}${pw ? "\nnew password" : ""}` +
+      (restart ? "\n\nThe miner restarts afterwards (hashing pauses for about a minute)." : "\n\nThe miner uses it after its next restart."))) return;
+    $("sclPeSave").disabled = true; $("sclPeNote").textContent = "saving…";
+    try {
+      const j = await api("POST", "/api/pools/edit", { miner_id: id, url, new_url: nu, payout: addr, worker: w, pass: pw });
+      if (!j.changed) toast("Nothing to change");
+      else {
+        toast(`Pool changed on ${nameOf(id)}`);
+        if (restart) await restartIds([id]);
+      }
+      plEdit = null;
+    } catch (err) {
+      toast(err.message, true);
+      if ($("sclPeSave")) { $("sclPeSave").disabled = false; $("sclPeNote").textContent = ""; }
+      return;
+    }
+    $("sclPlLists")._last = null;
+    if (window.sclRefresh) await window.sclRefresh();
+    renderPools();
+  }
   function outcome(j, what) {
     const res = (j && j.results) || {}, bad = Object.entries(res).filter(([, r]) => !r || r.ok === false);
     const good = Object.keys(res).length - bad.length;
@@ -1695,7 +1747,10 @@
     return Object.keys(res).filter(id => !bad.some(([b]) => b === id));
   }
   async function plClick(e) {
-    const f = e.target.closest("[data-plfirst]"), d = e.target.closest("[data-pldel]");
+    const f = e.target.closest("[data-plfirst]"), d = e.target.closest("[data-pldel]"), ed = e.target.closest("[data-pledit]");
+    if (e.target.id === "sclPeSave") return plSave();
+    if (e.target.id === "sclPeCancel") return plCloseEdit();
+    if (ed) return plOpenEdit(ed.dataset.pledit, ed.dataset.url);
     if (f) {
       const id = f.dataset.plfirst, url = f.dataset.url;
       if (!confirm(`Switch ${nameOf(id)} to ${hostOf(url)}?\n\nIt becomes the miner's first pool and the miner restarts (hashing pauses for about a minute).`)) return;

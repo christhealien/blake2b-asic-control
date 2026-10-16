@@ -1953,6 +1953,112 @@ def _restart_worker(mid: str) -> None:
             print(f"[notify] {e}", flush=True)
 
 
+# ---------------------------------------------------------------- edit a pool (Pools page, since 1.20.0)
+
+def _pool_url(u: Any) -> str:
+    u = str(u or "").strip()
+    return u if "://" in u else (f"stratum+tcp://{u}" if u else "")
+
+
+def _pool_match(pools: list[dict[str, Any]], url: str) -> int:
+    """The index of the pool with this address in the miner's own list (/mcb/pools). The page shows the addresses
+    as the mining software reports them, which can differ a little (the stratum+tcp:// prefix), so an exact match
+    is tried first, then one address containing the other; more than one match is refused."""
+    n = str(url or "").strip().lower()
+    if not n:
+        raise ValueError("say which pool to edit")
+    urls = [str((p or {}).get("url") or "").strip().lower() for p in pools]
+    hits = [i for i, u in enumerate(urls) if u == n] or [i for i, u in enumerate(urls) if u and (n in u or u in n)]
+    if not hits:
+        raise ValueError(f"the miner doesn't list the pool {url} any more; refresh the page")
+    if len(hits) > 1:
+        raise ValueError(f"the miner lists {url} more than once; remove the extra one first")
+    return hits[0]
+
+
+def _same_pool(p: dict[str, Any], want: dict[str, Any]) -> bool:
+    return (str(p.get("url") or "").strip().lower() == str(want.get("url") or "").strip().lower()
+            and str(p.get("user") or "") == str(want.get("user") or "")
+            and ("pass" not in p or "pass" not in want or str(p.get("pass")) == str(want.get("pass"))))
+
+
+def edit_pool(body: dict[str, Any]) -> dict[str, Any]:
+    """Change one pool of one miner in place: its address, payout address, worker name and/or password, keeping its
+    place in the list. Written as the miner's whole pool list (PUT /mcb/pools: what the dashboard already uses to
+    reorder pools) and read back. If the firmware doesn't take an edited entry that way, the new pool is added
+    (/mcb/newpool), moved to the old one's place and the old one removed, and that is read back too.
+    The mining software picks the change up when it restarts: the page restarts the miner when you ask it to."""
+    mid = str(body.get("miner_id") or "")
+    if not mid or mid.startswith("demo-"):
+        raise ValueError("pick a miner")
+    if tuner_addon.running(mid):
+        raise ValueError("a tuning run is going on this miner; edit its pools when the run has ended")
+    c = _srv().sync_clients().get(mid)
+    if c is None:
+        raise ValueError("no such miner")
+    new_url = _pool_url(body.get("new_url"))
+    payout, worker = str(body.get("payout") or "").strip(), str(body.get("worker") or "").strip()
+    if not new_url or not payout:
+        raise ValueError("give the pool address and the payout address")
+    if any(ch.isspace() for ch in new_url + payout + worker) or "." in payout:
+        raise ValueError("the pool address, payout address and worker name can't have spaces, "
+                         "and the payout address can't have a dot (the dot starts the worker name)")
+    pools = c.get_http_pools()
+    i = _pool_match(pools, str(body.get("url") or ""))
+    old = dict(pools[i])
+    want = {**old, "url": new_url, "user": payout + (f".{worker}" if worker else "")}
+    pw = body.get("pass")
+    if pw is not None and str(pw).strip():
+        want["pass"] = str(pw).strip()
+    if _same_pool(old, want):
+        return {"ok": True, "changed": False, "pools": pools}
+    others = [j for j in range(len(pools)) if j != i]
+    if any(_same_pool(pools[j], want) for j in others):
+        raise ValueError("the miner already has a pool with that address and login")
+    print(f"[pools] {mid}: editing pool {i} ({old.get('url')})", flush=True)
+    edited = [dict(p) for p in pools]
+    edited[i] = want
+    c.put_http_pools(edited)
+    back = c.get_http_pools()
+    if len(back) == len(pools) and _same_pool(back[i], want):
+        return {"ok": True, "changed": True, "how": "edited", "pools": back}
+    if not (len(back) == len(pools) and _same_pool(back[i], old)):
+        raise RuntimeError("the miner's pool list didn't read back as expected after the change; "
+                           "check the pools on the miner (refresh this page) before changing anything else")
+    # this firmware ignores edits in the pool list: add the new pool, put it in the old one's place, remove the old
+    if str(old.get("url") or "").strip().lower() == new_url.lower() and str(old.get("user") or "") == want["user"]:
+        raise RuntimeError("this miner's firmware didn't take the new password this way; "
+                           "add the pool again with the new password, then remove the old one")
+    print(f"[pools] {mid}: list edit not taken, adding the new pool and removing the old", flush=True)
+    c.add_pool(want["url"], want["user"], str(want.get("pass") or "x"))
+    cur = c.get_http_pools()
+    k = next((j for j in range(len(cur) - 1, -1, -1)
+              if _same_pool(cur[j], {"url": want["url"], "user": want["user"]})), None)
+    if k is None:
+        raise RuntimeError("the miner didn't add the new pool (the old one is unchanged)")
+    order = [p for j, p in enumerate(cur) if j != k]
+    order.insert(min(i, len(order)), cur[k])
+    out = []
+    for j, p in enumerate(order):
+        q = dict(p)
+        if "pool-priority" in q:
+            q["pool-priority"] = j
+        if "dragid" in q:
+            q["dragid"] = j
+        out.append(q)
+    c.put_http_pools(out)
+    cur = c.get_http_pools()
+    gone = next((p for p in cur if _same_pool(p, {"url": old.get("url"), "user": old.get("user")})), None)
+    if gone is not None:
+        c.del_pool(gone)
+    back = c.get_http_pools()
+    ok = (any(_same_pool(p, {"url": want["url"], "user": want["user"]}) for p in back)
+          and not any(_same_pool(p, {"url": old.get("url"), "user": old.get("user")}) for p in back))
+    if not ok:
+        raise RuntimeError("the change only partly went through; check the miner's pools (refresh this page)")
+    return {"ok": True, "changed": True, "how": "replaced", "pools": back}
+
+
 def restart_miners(body: dict[str, Any]) -> dict[str, Any]:
     ids = [str(x) for x in (body.get("ids") or []) if not str(x).startswith("demo-")]
     if not ids:
@@ -2379,7 +2485,7 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
           "/api/hardware/report": report_addon.start,
           "/api/quick/demo": set_demo, "/api/hardware/shares_reset": shares_addon.reset, "/api/quick/manual": take_manual,
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
-          "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, **schedule_addon.ROUTES_POST,
+          "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, "/api/pools/edit": edit_pool, **schedule_addon.ROUTES_POST,
           "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale,
           "/api/hardware/fan_target": set_fan_target, "/api/hardware/box_clock": set_box_clock,
           "/api/presets/box_defaults": box_default_presets, **notify_addon.ROUTES_POST}.get(path)

@@ -42,7 +42,7 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
 - **Notifications** on Telegram or Discord: a miner offline, too hot, low hashrate, restarted on its
   own, a scheduled change that failed, a tuning run finished, a new best-share record, a weak chip, a
   share rejected for a reason other than stale. Each kind and each miner on or off.
-- **Pools:** tick the miners on the page, see every pool each one has and the one it mines on, switch or
+- **Pools:** tick the miners on the page, see every pool each one has and the one it mines on, switch, edit or
   remove a pool per miner, add a pool to all of them (each keeps its worker name), or switch every ticked
   miner to one pool. **Settings** (account, time zone, best share numbers, notifications, a Miner
   reference explaining the miner's settings, web API, debug pages and port 4028 commands), Light and
