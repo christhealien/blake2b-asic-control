@@ -115,10 +115,29 @@ EDIT_GUARD = """  <script>(() => {
   })();</script>
 """
 
-# After app.js: open a tab from the address (/#settings, /#miner, /#batch, /#fleet)
+# After app.js: open a tab from the address (/#fleet, /#pools, /#settings, /#miner=<id>; #batch = #pools). The
+# address follows the tab you're on (setView keeps it up to date, see the hook below), so the browser's Refresh
+# stays on that tab, or on the miner you had open. The miners ticked on Fleet (Pools works on those too) are kept
+# for this browser tab the same way (sessionStorage: gone when the tab is closed).
 HASH_NAV = """  <script>(() => {
-    const id = { fleet: "tabFleet", batch: "tabBatch", pools: "tabBatch", settings: "tabSettings" }[location.hash.slice(1)];
-    if (id) document.getElementById(id).click();
+    const st = window.sclState, KEY = "b2ac.ticked";
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(KEY) || "[]");
+      if (st && st.selected && Array.isArray(saved)) saved.forEach((id) => st.selected.add(String(id)));
+    } catch (e) {}
+    const keep = () => setTimeout(() => {
+      try { if (st && st.selected) sessionStorage.setItem(KEY, JSON.stringify([...st.selected])); } catch (e) {}
+    }, 0);
+    document.addEventListener("click", keep, true);
+    document.addEventListener("change", keep, true);
+    const go = () => {
+      const h = decodeURIComponent(location.hash.slice(1));
+      if (h.startsWith("miner=") && h.length > 6 && window.sclOpenDetail) { window.sclOpenDetail(h.slice(6)); return; }
+      const id = { fleet: "tabFleet", batch: "tabBatch", pools: "tabBatch", settings: "tabSettings" }[h];
+      if (id && document.getElementById(id)) document.getElementById(id).click();
+    };
+    go();
+    window.addEventListener("hashchange", go);
   })();</script>
 """
 MARK = "tuner_addon"
@@ -364,7 +383,16 @@ def patch_appjs(text: str) -> str:
              ('  $("tabFleet").onclick = () => setView("fleet");',
               '  $("tabFleet").onclick = () => setView("fleet");\n  window.sclRefresh = refreshAllSnapshots;'
               '\n  window.sclDetail = () => (state.view === "detail" ? state.detailId : null);'
-              '\n  window.sclRender = renderFleet;')]
+              '\n  window.sclRender = renderFleet;'
+              '\n  window.sclOpenDetail = openDetail;'),
+             # the address follows the tab (replaceState: no history entry per tab, nothing reloads)
+             ("  function setView(v) {\n    state.view = v;",
+              "  function setView(v) {\n    state.view = v;\n"
+              "    try {\n"
+              "      const h = v === \"detail\" ? (state.detailId ? \"miner=\" + encodeURIComponent(state.detailId) : \"\")\n"
+              "        : v === \"batch\" ? \"pools\" : v;\n"
+              "      if (h && location.hash.slice(1) !== h) history.replaceState(null, \"\", \"#\" + h);\n"
+              "    } catch (e) {}")]
     for a, b in hooks:
         if a not in text:
             raise SystemExit(f"could not find {a.strip()!r} in static/app.js")

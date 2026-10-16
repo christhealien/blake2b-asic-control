@@ -3,6 +3,17 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.19.3 (2026-10-16)
+
+- **Refresh stays on your tab:** the address now follows the tab you're on (`/#fleet`, `/#pools`, `/#settings`,
+  and `/#miner=<id>` on a miner's page), so the browser's Refresh, or a bookmark, opens the same tab or miner again.
+  Before, the address kept whatever it was opened with: after coming in from another page's Settings button it
+  stayed `/#settings`, so Refresh on Fleet jumped to Settings, and Refresh anywhere else went back to Fleet.
+  Switching tabs doesn't add browser history entries (the address is replaced, nothing reloads).
+- **Ticked miners survive Refresh:** the miners ticked on Fleet (Pools works on the same ones) are kept for that
+  browser tab (in the tab's session storage, gone when the tab is closed).
+- Profiles, Schedule and Tuner already kept the miner they show in their address (`?miner=`).
+
 ## 1.19.2 (2026-10-16)
 
 - **Browser tab icon:** every page (and the sign-in page) shows the app's icon in the browser tab and in bookmarks,
