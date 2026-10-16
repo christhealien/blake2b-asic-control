@@ -41,7 +41,7 @@ COOKIE = "b2ac_session"
 SESSION_DAYS = 30
 ITERATIONS = 600_000          # PBKDF2-SHA256 (OWASP 2023); older hashes keep their own count until next sign-in
 CSRF_HEADER = "X-B2AC"         # every page's fetch adds it (theme.js); another site can't without a CORS preflight
-OPEN_PATHS = {"/login.html", "/style.css", "/theme.css", "/theme.js", "/favicon.ico"}
+OPEN_PATHS = {"/login.html", "/style.css", "/theme.css", "/theme.js", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png"}
 # Signing in (and creating the login) needs the disclaimer on the sign-in page acknowledged.
 # Change this when the disclaimer text changes. Each acknowledgement is logged in auth.json.
 DISCLAIMER_VERSION = "2026-09-29"

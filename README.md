@@ -350,6 +350,7 @@ Umbrel only reads `*/umbrel-app.yml` in a store repo, so `app/` is ignored by it
 | `miner_safety.py` | Paced, bounded reads from miners, and miner-reported text cleaned before it reaches a page |
 | `auth_addon.py` / `login.html` | The login and the sign-in page |
 | `theme.css` / `theme.js` | The monochrome look with Light / Dark |
+| `favicon.svg` / `favicon.ico` / `apple-touch-icon.png` | The browser tab and home-screen icon (the app icon) |
 | `widget_server.py` | The Umbrel home-screen widgets (internal port 8788) |
 | `run-local.sh` / `run-local.ps1` | Run it without Docker (see TESTING.md) |
 

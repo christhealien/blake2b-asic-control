@@ -3,6 +3,14 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.19.2 (2026-10-16)
+
+- **Browser tab icon:** every page (and the sign-in page) shows the app's icon in the browser tab and in bookmarks,
+  and as the icon when added to a phone's home screen. Files: `favicon.svg`, plus `favicon.ico` (32 px) and
+  `apple-touch-icon.png` (180 px) made from the same drawing. `install_addons.py` puts them in `static/` (replacing
+  the dashboard's own `favicon.ico`) and links them in `index.html`; the add-on pages link them directly. They can
+  be loaded before signing in.
+
 ## 1.19.1 (2026-10-16)
 
 **Tuner: a steadier fan hold, and holding the chips.** Prompted by a run on a new SC Lite (stock 615 MHz).

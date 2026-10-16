@@ -12,6 +12,7 @@ Restart the dashboard (python server.py) afterwards.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -42,6 +43,10 @@ LOGIN_DST = HERE / "static" / "login.html"
 THEME_SRC = HERE / "theme.css"
 THEME_DST = HERE / "static" / "theme.css"
 THEME_LINK = '  <link rel="stylesheet" href="/theme.css" />\n'
+ICON_FILES = ("favicon.svg", "favicon.ico", "apple-touch-icon.png")   # the browser tab icon (since 1.19.2)
+ICON_LINKS = ('  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />\n'
+              '  <link rel="icon" href="/favicon.ico" sizes="32x32" />\n'
+              '  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />\n')
 THEMEJS_SRC = HERE / "theme.js"
 THEMEJS_DST = HERE / "static" / "theme.js"
 THEMEJS_TAG = '  <script src="/theme.js"></script>\n'
@@ -472,6 +477,9 @@ def install() -> None:
         shutil.move(str(THEME_SRC), str(THEME_DST))
     if THEMEJS_SRC.exists():
         shutil.move(str(THEMEJS_SRC), str(THEMEJS_DST))
+    for name in ICON_FILES:
+        if (HERE / name).exists():
+            os.replace(HERE / name, HERE / "static" / name)    # replaces the dashboard's own favicon.ico
     if PROF_SRC.exists():
         shutil.move(str(PROF_SRC), str(PROF_DST))
     if not PROF_DST.exists():
@@ -509,6 +517,12 @@ def install() -> None:
         backup(INDEX)
         INDEX.write_text(h.replace("</head>", THEME_LINK + "</head>", 1), encoding="utf-8")
         print("index.html: monochrome theme linked")
+
+    h = INDEX.read_text(encoding="utf-8")
+    if "favicon.svg" not in h:
+        backup(INDEX)
+        INDEX.write_text(h.replace("</head>", ICON_LINKS + "</head>", 1), encoding="utf-8")
+        print("index.html: browser tab icon linked")
 
     h = INDEX.read_text(encoding="utf-8")
     changed = False
