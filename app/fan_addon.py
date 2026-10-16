@@ -1982,6 +1982,11 @@ def _same_pool(p: dict[str, Any], want: dict[str, Any]) -> bool:
             and ("pass" not in p or "pass" not in want or str(p.get("pass")) == str(want.get("pass"))))
 
 
+def _no_pass(pools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The pool list for the page: without the pool passwords."""
+    return [{k: v for k, v in p.items() if k != "pass"} for p in pools if isinstance(p, dict)]
+
+
 def edit_pool(body: dict[str, Any]) -> dict[str, Any]:
     """Change one pool of one miner in place: its address, payout address, worker name and/or password, keeping its
     place in the list. Written as the miner's whole pool list (PUT /mcb/pools: what the dashboard already uses to
@@ -2011,7 +2016,7 @@ def edit_pool(body: dict[str, Any]) -> dict[str, Any]:
     if pw is not None and str(pw).strip():
         want["pass"] = str(pw).strip()
     if _same_pool(old, want):
-        return {"ok": True, "changed": False, "pools": pools}
+        return {"ok": True, "changed": False, "pools": _no_pass(pools)}
     others = [j for j in range(len(pools)) if j != i]
     if any(_same_pool(pools[j], want) for j in others):
         raise ValueError("the miner already has a pool with that address and login")
@@ -2021,7 +2026,7 @@ def edit_pool(body: dict[str, Any]) -> dict[str, Any]:
     c.put_http_pools(edited)
     back = c.get_http_pools()
     if len(back) == len(pools) and _same_pool(back[i], want):
-        return {"ok": True, "changed": True, "how": "edited", "pools": back}
+        return {"ok": True, "changed": True, "how": "edited", "pools": _no_pass(back)}
     if not (len(back) == len(pools) and _same_pool(back[i], old)):
         raise RuntimeError("the miner's pool list didn't read back as expected after the change; "
                            "check the pools on the miner (refresh this page) before changing anything else")
@@ -2056,7 +2061,7 @@ def edit_pool(body: dict[str, Any]) -> dict[str, Any]:
           and not any(_same_pool(p, {"url": old.get("url"), "user": old.get("user")}) for p in back))
     if not ok:
         raise RuntimeError("the change only partly went through; check the miner's pools (refresh this page)")
-    return {"ok": True, "changed": True, "how": "replaced", "pools": back}
+    return {"ok": True, "changed": True, "how": "replaced", "pools": _no_pass(back)}
 
 
 def restart_miners(body: dict[str, Any]) -> dict[str, Any]:
@@ -2485,7 +2490,7 @@ def handle_post(handler: Any, path: str, body: dict[str, Any], json_response: Ca
           "/api/hardware/report": report_addon.start,
           "/api/quick/demo": set_demo, "/api/hardware/shares_reset": shares_addon.reset, "/api/quick/manual": take_manual,
           "/api/fans/temp_source": set_temp_source, "/api/hardware/power_cal": calibrate_power,
-          "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, "/api/pools/edit": edit_pool, **schedule_addon.ROUTES_POST,
+          "/api/hardware/mains": set_mains, "/api/quick/restart": restart_miners, "/api/quick/pool_edit": edit_pool, **schedule_addon.ROUTES_POST,
           "/api/settings/timezone": set_tz, "/api/settings/share_scale": set_scale,
           "/api/hardware/fan_target": set_fan_target, "/api/hardware/box_clock": set_box_clock,
           "/api/presets/box_defaults": box_default_presets, **notify_addon.ROUTES_POST}.get(path)

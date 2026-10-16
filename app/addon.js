@@ -1723,7 +1723,7 @@
       (restart ? "\n\nThe miner restarts afterwards (hashing pauses for about a minute)." : "\n\nThe miner uses it after its next restart."))) return;
     $("sclPeSave").disabled = true; $("sclPeNote").textContent = "saving…";
     try {
-      const j = await api("POST", "/api/pools/edit", { miner_id: id, url, new_url: nu, payout: addr, worker: w, pass: pw });
+      const j = await api("POST", "/api/quick/pool_edit", { miner_id: id, url, new_url: nu, payout: addr, worker: w, pass: pw });
       if (!j.changed) toast("Nothing to change");
       else {
         toast(`Pool changed on ${nameOf(id)}`);
