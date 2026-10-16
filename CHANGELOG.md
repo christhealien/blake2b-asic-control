@@ -3,6 +3,14 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.20.2 (2026-10-16)
+
+- **Top bar in one row** (every page, wider than a phone): the app icon before the name, then the page tabs, and on
+  the right Refresh / auto (where the page has them), Settings and the theme button last. Every button in the bar
+  is the same height (34 px), padding, weight and corner, lined up on one centre line; before, Settings sat above
+  the other buttons. Below about 1100 px wide the right-hand buttons move to a second row, kept to the right.
+  Phones keep their two-row bar. All in `theme.css`; no page markup changed.
+
 ## 1.20.1 (2026-10-16)
 
 - **Fixed: pool edit said "not found".** The Save button of the new pool edit form called a route the dashboard's

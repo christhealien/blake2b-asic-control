@@ -165,3 +165,34 @@ th, td { border-bottom-color: var(--line); }
   .slider-row .mono { min-width: 2.2ch; text-align: right; }
   .slider-row button.primary { flex: 1 0 100%; }
 }
+
+/* ---------- top bar (wider screens): one row, every button the same size, like the other apps on the box ----------
+   logo + name on the left, then the page tabs; on the right Refresh / auto, Settings, then the theme button.
+   Phones keep their own two-row layout (above). */
+@media (min-width: 641px) {
+  header.app { flex-wrap: nowrap; gap: 1.1rem; padding: .7rem 1.25rem; min-height: 56px; }
+  header.app h1 { display: flex; align-items: center; gap: .55rem; font-size: 1.05rem; font-weight: 500;
+    letter-spacing: .01em; white-space: nowrap; flex: 0 0 auto; }
+  header.app h1::before { content: ""; width: 24px; height: 24px; flex: 0 0 24px;
+    background: url("/favicon.svg") center / contain no-repeat; }
+  header.app h1 .brand { font-weight: 700; }
+  header.app .tabs { flex-wrap: nowrap; gap: .45rem; align-items: center; min-width: 0; }
+  header.app .hdr-right, header.app .hdr-right > .row { display: flex; flex-direction: row; align-items: center;
+    gap: .5rem; flex-wrap: nowrap; }
+  header.app .hdr-right > .row { display: contents; }
+  header.app .hdr-right > .row:last-child > * { order: 1; }
+  header.app .hdr-right > .row:first-child > * { order: 2; }
+  header.app .hdr-right > .row > .theme-btn { order: 3; }
+  header.app .hdr-right > .row > .pill { order: 0; }
+  header.app .hdr-right { margin-left: auto; }
+  header.app button { height: 34px; padding: 0 .85rem; font-size: .95rem; font-weight: 500; line-height: 1;
+    border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+    white-space: nowrap; }
+  header.app button.active { font-weight: 600; }
+  header.app .hdr-right label { display: inline-flex; align-items: center; gap: .3rem; font-size: .9rem; white-space: nowrap; }
+}
+/* medium widths: the tabs get the room first, the auto-refresh note goes */
+@media (min-width: 641px) and (max-width: 1100px) {
+  header.app { flex-wrap: wrap; row-gap: .5rem; }
+  header.app #autoState { display: none; }
+}
