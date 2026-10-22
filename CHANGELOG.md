@@ -3,6 +3,16 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.21.1 (2026-10-22)
+
+- **Fixed: Profiles page empty until Probe.** The page's data (`/api/fans/state`) waited for a fresh
+  temperature and fan reading from every miner, so one miner that was off, rebooting or unreachable held the
+  whole answer up for about 15 s (the port-4028 timeout), every time its reading was older than 12 s. The
+  page showed an empty Miner list and dashes until then. Now the readings are refreshed in the background:
+  the answer waits at most 1.5 s for them and otherwise uses the last reading. A miner whose first reading
+  isn't in yet shows "reading…", and the page asks again after 3 s instead of 15 (5 s after an error).
+  Measured with one unreachable miner: 15.6 s per request before, 1.5 s for the first and instant after.
+
 ## 1.21.0 (2026-10-22)
 
 - **Miner report: "with network lines"** (Profiles, next to Download report, off by default). The report used to

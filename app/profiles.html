@@ -908,8 +908,9 @@ function renderHeader() {
   sel.value = minerId;
   const m = miner();
   const lv = (m && m.live) || {};
-  $("stTemp").textContent = fmtT(lv.temp_max);
-  $("stFans").textContent = (lv.fan_rpm || []).length ? `${Math.max(...lv.fan_rpm)} RPM` : (lv.online === false ? "offline" : "—");
+  const first = lv.reading && lv.ts == null;          // its first reading is still under way
+  $("stTemp").textContent = first ? "reading…" : fmtT(lv.temp_max);
+  $("stFans").textContent = first ? "reading…" : (lv.fan_rpm || []).length ? `${Math.max(...lv.fan_rpm)} RPM` : (lv.online === false ? "offline" : "—");
   const fc = (m && m.fan_control) || {};
   $("stAuto").textContent = !m ? "—" : m.tuner_fans ? "tuner" : fc.enabled ? profLabel(fc.profile).replace(/^Curve: /, "") : "off";
   const ap = m && (m.presets || {})[m.active_preset];
@@ -936,8 +937,12 @@ function renderAll() {
   } else { renderList(); drawCurve(); }
 }
 async function load() {
-  try { S = await api("GET", "/api/fans/state"); renderAll(); }
-  catch (e) { toast("Couldn't load: " + e.message, true); }
+  try {
+    S = await api("GET", "/api/fans/state"); renderAll();
+    // a miner's first reading wasn't in yet (it's slow or off): ask again soon instead of in 15 s
+    clearTimeout(load._soon);
+    if ((S.miners || []).some(m => (m.live || {}).reading && (m.live || {}).ts == null)) load._soon = setTimeout(load, 3000);
+  } catch (e) { toast("Couldn't load: " + e.message, true); clearTimeout(load._soon); load._soon = setTimeout(load, 5000); }
 }
 $("btnRefresh").onclick = load;
 document.addEventListener("themechange", drawCurve);

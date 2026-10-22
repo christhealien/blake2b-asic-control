@@ -385,17 +385,37 @@ def _read_live(mid: str, client: Any) -> dict[str, Any]:
     return out
 
 
+_live_busy: set[str] = set()          # miners whose live read is under way
+LIVE_WAIT_S = 1.5                     # how long a page waits for fresh readings before it gets the last ones
+
+
+def _refresh_live(mid: str, client: Any) -> None:
+    try:
+        val = _read_live(mid, client)
+    except Exception as e:                 # never leave a miner marked busy
+        val = {"ts": time.time(), "online": False, "error": str(e)[:80]}
+    with _live_lock:
+        _live[mid] = val
+        _live_busy.discard(mid)
+
+
 def live_all(clients: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The latest temperatures and fan speeds of every miner. Readings older than LIVE_MAX_AGE are read again in
+    the background; this waits at most LIVE_WAIT_S for them and otherwise answers with the last ones (or none
+    yet). Before 1.21.1 it waited for every read, so one miner that was off or unreachable held up the whole
+    answer for about 15 s, and the Profiles page stayed empty until then."""
     now = time.time()
     with _live_lock:
         stale = [(mid, c) for mid, c in clients.items()
-                 if now - float((_live.get(mid) or {}).get("ts") or 0) > LIVE_MAX_AGE]
-    if stale:
-        results = list(_pool.map(lambda mc: (mc[0], _read_live(*mc)), stale))
-        with _live_lock:
-            _live.update(dict(results))
+                 if mid not in _live_busy and now - float((_live.get(mid) or {}).get("ts") or 0) > LIVE_MAX_AGE]
+        _live_busy.update(mid for mid, _c in stale)
+    futs = [_pool.submit(_refresh_live, mid, c) for mid, c in stale]
+    if futs:
+        from concurrent.futures import wait
+        wait(futs, timeout=LIVE_WAIT_S)
     with _live_lock:
-        return {mid: dict(_live.get(mid) or {}) for mid in clients}
+        return {mid: {**dict(_live.get(mid) or {}), **({"reading": True} if mid in _live_busy else {})}
+                for mid in clients}
 
 
 # ---------------------------------------------------------------- presets
