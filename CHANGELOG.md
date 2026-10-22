@@ -3,6 +3,18 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.21.0 (2026-10-22)
+
+- **Miner report: "with network lines"** (Profiles, next to Download report, off by default). The report used to
+  drop every log line that mentions a pool, a user, a wallet or the network, which also hid connection problems.
+  Ticked, those lines are kept (connected, lost, refused, timed out, difficulty, new job) with their private
+  values replaced by `<removed>`: pool and web addresses, IP addresses, logins (`user …`, `worker=…`,
+  `password …`), wallet addresses and the worker name after them, and WiFi network names. The port-4028 `pools`
+  command is read too (`port4028_pools.json`: status, accepted / rejected / stale, failures, last share) with its
+  addresses and logins taken out, and those exact logins (and their address and worker parts) are taken out of
+  every log line as well. The pool settings page and the WiFi settings are still never read. README.txt and
+  summary.txt in the zip say which way it was made. (`report_addon.scrub_net_line`, `pool_secrets`.)
+
 ## 1.20.2 (2026-10-16)
 
 - **Top bar in one row** (every page, wider than a phone): the app icon before the name, then the page tabs, and on

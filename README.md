@@ -129,8 +129,9 @@ firmware). Updating is your call: "no need to upgrade if everything is fine", as
 **Download report**. It reads the miner (one request at a time, nothing is changed, about 30 s) and
 saves a zip of what support takes: how it writes clock and voltage, its boards and chips, what its own
 pages answer and, if ticked, its log. The MAC address, IP addresses, pool URLs, wallets, workers and
-tokens are taken out, and the pool and WiFi settings aren't read at all. It's plain text, so look it
-over, then attach it to a [new issue](https://github.com/christhealien/blake2b-asic-control/issues/new)
+tokens are taken out, and the pool and WiFi settings aren't read at all. Tick **with network lines**
+to keep the log's pool and connection lines too (and each pool's connection stats), still with
+addresses, logins, worker names and passwords taken out. It's plain text, so look it over, then attach it to a [new issue](https://github.com/christhealien/blake2b-asic-control/issues/new)
 saying which unit it is. Support is only claimed for a model after a report like this and a test on a
 real unit.
 

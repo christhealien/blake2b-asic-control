@@ -118,6 +118,7 @@
         <button type="button" id="btnProbe">Probe now</button>
         <button type="button" id="btnReport" title="Reads the miner (nothing is changed) and downloads a zip for adding support for a model. Nothing private goes in it: no pool, wallet, WiFi or password; MAC and IP addresses are taken out.">Download report</button>
         <label class="muted" style="font-size:.85rem"><input type="checkbox" id="repLog" checked> with the miner's log</label>
+        <label class="muted" style="font-size:.85rem" title="Also keeps the log's pool and network lines (connected, lost, refused, timed out…) and adds each pool's connection stats. Addresses, logins, worker names and passwords are still taken out."><input type="checkbox" id="repNet"> with network lines</label>
         <span id="repState" class="muted" style="font-size:.85rem"></span>
       </div>
       <p id="repNote" class="hint hidden" style="margin:.5rem 0 0"></p>
@@ -126,7 +127,8 @@
           changed), and it's plain text you can check before sending. What's left out:</summary>
         <ul style="margin:.35rem 0 0 1.1rem;padding:0;line-height:1.5">
           <li><b>Never read at all:</b> the pool settings (pool address, wallet, worker and its password), the WiFi
-            settings (network names and passwords) and the miner's pool list on port 4028.</li>
+            settings (network names and passwords) and, unless "with network lines" is ticked, the miner's pool list
+            on port 4028.</li>
           <li><b>Never written:</b> the miner's password and the login token.</li>
           <li><b>Taken out of everything that is read:</b> the MAC address (shown as 00:11:22:33:44:55), IP addresses,
             web and pool addresses, e-mail addresses, and anything that looks like a wallet address or a token.</li>
@@ -134,6 +136,11 @@
             serial, and any text that mentions a pool, a user, a wallet or the network.</li>
           <li><b>From the miner's log</b> (only if ticked): every line that mentions a pool, a user, a worker, a wallet,
             a login or the network is dropped whole. Untick "with the miner's log" to leave the log out entirely.</li>
+          <li><b>With network lines</b> (only if ticked): those pool and network lines are kept instead, so connection
+            problems show (connected, lost, refused, timed out, difficulty, new job), and each pool's connection stats are
+            added (status, accepted / rejected / stale, failures, last share). In them, pool and web addresses, IP
+            addresses, logins, wallet addresses, worker names, passwords and network names are replaced with
+            &lt;removed&gt;. Look the log over before you send it.</li>
         </ul>
         <p style="margin:.35rem 0 0">What stays: model and firmware, the clock and voltage plans, boards, chips, fans,
           temperatures, hashrate and error counts. The zip's README.txt lists the same, and summary.txt says how many
@@ -886,7 +893,7 @@ async function pollReport(id, want) {
 $("btnReport").onclick = async () => {
   const m = miner(); if (!m) return;
   $("btnReport").disabled = true; $("repState").textContent = "starting…";
-  try { await api("POST", "/api/hardware/report", { miner_id: m.id, log: $("repLog").checked }); pollReport(m.id, true); }
+  try { await api("POST", "/api/hardware/report", { miner_id: m.id, log: $("repLog").checked, network: $("repNet").checked }); pollReport(m.id, true); }
   catch (e) { $("btnReport").disabled = false; $("repState").textContent = ""; toast(e.message, true); }
 };
 

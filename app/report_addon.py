@@ -16,7 +16,10 @@ addresses, anything that looks like a wallet or a token (any unbroken run of 24+
 string values under keys like user, pass, wallet, worker, pool, url, ssid, host, ip, mac, serial, and
 any string value that mentions a pool, a user, a worker, a wallet or the network.
 From the miner's log, every line that mentions a pool, a user, a worker, a wallet or the network is
-dropped whole. The login token is only ever in a request header and is never written.
+dropped whole, unless "with network lines" is ticked (since 1.21.0): then those lines are kept with their
+private values taken out (scrub_net_line), and the port-4028 "pools" command is read for its connection
+stats, its addresses and logins taken out (and those exact logins taken out of the log too).
+The login token is only ever in a request header and is never written.
 """
 from __future__ import annotations
 
@@ -43,7 +46,10 @@ HTTP_READS = [
     ("dbg_fanctrllog.txt", "/dbg/fanctrllog", "the firmware's own fan controller log"),
     ("cpb_hshistory.json", "/cpb/hshistory", "the miner's own hashrate history (how often it samples)"),
 ]
-LOG_READ = ("miner_log.txt", "/dbg/minersyslog", "the miner's own log, with every pool, user, wallet and network line taken out")
+LOG_READ = ("miner_log.txt", "/dbg/minersyslog", "the miner's own log (see above for what's taken out)")
+# with network lines (since 1.21.0): the mining software's pool table, its connection stats only
+POOLS_READ = ("port4028_pools.json", "pools", "each pool's connection stats: status, accepted / rejected / stale, "
+              "failures, last share (pool address, login and password taken out)")
 PORT_READS = [
     ("port4028_version.json", "version", "software versions"),
     ("port4028_summary.json", "summary", "totals: hashrate, accepted / rejected shares, uptime"),
@@ -116,15 +122,55 @@ def scrub(obj: Any, key: str = "") -> Any:
     return obj
 
 
-def scrub_log(text: str) -> tuple[str, int, int]:
-    """The miner's log without any line that mentions a pool, a user, a wallet or the network, and with the
-    rest scrubbed. Returns (text, lines kept, lines dropped)."""
+# in a network line: the value after a private word ("user: x", "worker=x", "password x", "ssid 'x'")
+_NET_VALUE = re.compile(r"(?i)(?<!<)\b(user(?:name)?|worker(?:name)?|pass(?:word|wd)?|pwd|psk|ssid|wallet|account|"
+                        r"token|login|e-?mail|hostname|host)\b(\s*[\"']?\s*[:=]\s*[\"']?|\s+[\"']?)(?!<)([^\s,\"';)\]]+)")
+_AFTER_ADDR = re.compile(r"<removed>\.[\w.\-]+")        # address.worker: the worker name goes with the address
+
+
+def scrub_net_line(line: str, secrets: tuple[str, ...] = ()) -> str:
+    """A network line kept readable: what happened stays (connected, lost, refused, timed out, difficulty, job),
+    while addresses, logins, worker names, passwords and network names are taken out. secrets: exact strings to
+    take out as well (the pool logins the miner reports, and their address and worker parts)."""
+    for s in secrets:
+        line = line.replace(s, "<removed>")
+    line = scrub_text(line)
+    line = _NET_VALUE.sub(lambda m: m.group(1) + m.group(2) + "<removed>", line)
+    return _AFTER_ADDR.sub("<removed>", line)
+
+
+def pool_secrets(raw: Any) -> tuple[str, ...]:
+    """Every pool login in the port-4028 pools answer, with its address and worker parts, longest first (so a
+    full login is taken out before its parts)."""
+    out: set[str] = set()
+    pools = raw.get("POOLS") if isinstance(raw, dict) else None
+    for p in pools or []:
+        if not isinstance(p, dict):
+            continue
+        for k in ("User", "URL", "Stratum URL"):
+            v = str(p.get(k) or "").strip()
+            if len(v) < 3:
+                continue
+            out.add(v)
+            if k == "User" and "." in v:
+                a, w = v.split(".", 1)
+                out.update(x for x in (a, w) if len(x) >= 3)
+    return tuple(sorted(out, key=len, reverse=True))
+
+
+def scrub_log(text: str, network: bool = False, secrets: tuple[str, ...] = ()) -> tuple[str, int, int]:
+    """The miner's log, scrubbed. Without network: any line that mentions a pool, a user, a wallet or the
+    network is dropped whole. With network: those lines are kept, with their private values taken out
+    (scrub_net_line). Returns (text, lines kept, lines dropped)."""
     kept, dropped = [], 0
     for line in text.splitlines():
         if _LOG_DROP.search(line):
-            dropped += 1
+            if not network:
+                dropped += 1
+                continue
+            kept.append(scrub_net_line(line, secrets))
             continue
-        kept.append(scrub_text(line))
+        kept.append(scrub_text(line) if not secrets else scrub_net_line(line, secrets))
     out = "\n".join(kept)
     if len(out) > LOG_MAX:
         out = "(older lines cut)\n" + out[-LOG_MAX:]
@@ -159,10 +205,12 @@ def _expire() -> None:
             del _jobs[mid]
 
 
-def _run(mid: str, name: str, with_log: bool) -> None:
+def _run(mid: str, name: str, with_log: bool, network: bool = False) -> None:
     files: dict[str, str] = {}
     reads: list[dict[str, Any]] = []
-    steps = 1 + len(PORT_READS) + len(HTTP_READS) + (1 if with_log else 0)
+    port_reads = PORT_READS + ([POOLS_READ] if network else [])
+    secrets: tuple[str, ...] = ()
+    steps = 1 + len(port_reads) + len(HTTP_READS) + (1 if with_log else 0)
     done = [0]
 
     def step(what: str) -> None:
@@ -179,13 +227,20 @@ def _run(mid: str, name: str, with_log: bool) -> None:
         client = _client(mid)
         if client is None:
             raise RuntimeError("this miner has no address saved")
-        for fname, cmd, why in PORT_READS:
+        for fname, cmd, why in port_reads:
             time.sleep(PAUSE_S)
             step(f"port 4028: {cmd}")
             t0 = time.time()
             try:
                 raw = client.bfg(cmd)
-                files[fname] = _as_text(raw)
+                if cmd == "pools":
+                    secrets = pool_secrets(raw)        # to take the logins out of the log lines too
+                    text = _as_text(raw)
+                    for s in secrets:
+                        text = text.replace(s, "<removed>")
+                    files[fname] = text
+                else:
+                    files[fname] = _as_text(raw)
                 reads.append({"file": fname, "read": f"port 4028 {cmd}", "ok": True, "ms": int((time.time() - t0) * 1000)})
             except Exception as e:
                 reads.append({"file": fname, "read": f"port 4028 {cmd}", "ok": False, "error": scrub_text(str(e))[:200]})
@@ -200,7 +255,7 @@ def _run(mid: str, name: str, with_log: bool) -> None:
                 if fname == LOG_READ[0]:
                     if isinstance(raw, dict):
                         raw = raw.get("body") or raw.get("data") or json.dumps(raw)
-                    text, kept, dropped = scrub_log(str(raw or ""))
+                    text, kept, dropped = scrub_log(str(raw or ""), network, secrets)
                     rec.update(lines_kept=kept, lines_dropped=dropped)
                     files[fname] = text
                 else:
@@ -213,8 +268,8 @@ def _run(mid: str, name: str, with_log: bool) -> None:
             reads.append(rec)
         stamp = time.strftime("%Y%m%d-%H%M")
         safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(hw.get("name") or "miner"))[:40]
-        files["summary.txt"] = _summary(hw, reads, with_log)
-        files["README.txt"] = _readme(with_log)
+        files["summary.txt"] = _summary(hw, reads, with_log, network)
+        files["README.txt"] = _readme(with_log, network)
         files["reads.json"] = json.dumps({"app_version": _version, "made": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                                           "pause_s": PAUSE_S, "reads": reads}, indent=1)
         buf = io.BytesIO()
@@ -232,7 +287,7 @@ def _run(mid: str, name: str, with_log: bool) -> None:
         _set(mid, state="error", step=scrub_text(msg)[:200], at=time.time())
 
 
-def _summary(hw: dict[str, Any], reads: list[dict[str, Any]], with_log: bool) -> str:
+def _summary(hw: dict[str, Any], reads: list[dict[str, Any]], with_log: bool, network: bool = False) -> str:
     g = lambda k: hw.get(k) if hw.get(k) not in (None, "") else "?"
     cpb = hw.get("chips_per_board")
     lines = [
@@ -253,16 +308,31 @@ def _summary(hw: dict[str, Any], reads: list[dict[str, Any]], with_log: bool) ->
         lines.append(f"probe problem: {scrub_text(str(hw.get('error') or 'no answer'))}")
     lines += ["", "reads (one at a time, nothing changed on the miner):"]
     for r in reads:
-        extra = f", {r['lines_kept']} log lines kept, {r['lines_dropped']} dropped" if "lines_kept" in r else ""
+        extra = (f", {r['lines_kept']} log lines kept, {r['lines_dropped']} dropped" if "lines_kept" in r and not network
+                 else f", {r['lines_kept']} log lines kept (network lines with addresses and logins taken out)"
+                 if "lines_kept" in r else "")
         lines.append(f"  {'ok  ' if r.get('ok') else 'FAIL'} {r['read']}"
                      + (f"  {r.get('ms')} ms{extra}" if r.get("ok") else f"  {r.get('error')}"))
     if not with_log:
         lines.append("  (the miner's log wasn't included)")
+    lines.append("network lines: " + ("included, with addresses, logins, worker names and passwords taken out"
+                                      if network else "left out"))
     return "\n".join(lines) + "\n"
 
 
-def _readme(with_log: bool) -> str:
-    what = "\n".join(f"  {f:24} {why}" for f, _p, why in PORT_READS + HTTP_READS + ([LOG_READ] if with_log else []))
+def _readme(with_log: bool, network: bool = False) -> str:
+    what = "\n".join(f"  {f:24} {why}" for f, _p, why in PORT_READS + ([POOLS_READ] if network else []) + HTTP_READS
+                     + ([LOG_READ] if with_log else []))
+    never = ('the pool settings page (/mcb/pools: pool URL, wallet, worker password) and the WiFi settings. With\n'
+             'network lines, the port-4028 "pools" command is read for its connection stats; its pool addresses,\n'
+             'logins and passwords are taken out before anything is written.' if network else
+             'the pool settings (pool URL, wallet, worker password), the WiFi settings, and the\nport-4028 "pools" command.')
+    logrule = ("""
+From the miner's own log: every line is kept, network and pool lines included (connected, lost, refused,
+timed out, difficulty, new job), but in them the pool and web addresses, IP addresses, logins, wallet
+addresses, worker names, passwords and network names are replaced with <removed>.""" if network else """
+From the miner's own log, every line that mentions a pool, a user, a worker, a wallet, a login or the
+network was dropped whole (summary.txt says how many).""") if with_log else ""
     return f"""Blake2b ASIC Control: miner report
 
 This folder is what the app read from one of your miners, so support for a model (or firmware) it
@@ -272,16 +342,13 @@ send it.
 
 Nothing was changed on the miner. Every request was a read, one at a time with a {PAUSE_S:.0f} s pause.
 
-Not read at all: the pool settings (pool URL, wallet, worker password), the WiFi settings, and the
-port-4028 "pools" command.
+Not read at all: {never}
 
 Taken out of what was read: the MAC address (shown as 00:11:22:33:44:55), IP addresses, URLs (pool
 addresses), e-mail addresses, anything that looks like a wallet address or a token (any unbroken run
 of 24 or more letters and digits), and the text of any setting named like user, password, wallet,
 worker, pool, url, ssid, host, ip, mac or serial, or that mentions a pool, a user, a wallet or the
-network.{'''
-From the miner's own log, every line that mentions a pool, a user, a worker, a wallet, a login or the
-network was dropped whole (summary.txt says how many).''' if with_log else ''}
+network.{logrule}
 Your miner's password and the login token are never written to any file.
 
 Files:
@@ -311,7 +378,7 @@ def start(body: dict[str, Any]) -> dict[str, Any]:
         if j and j.get("state") == "running":
             raise ValueError("a report for this miner is already being made")
         _jobs[mid] = {"state": "running", "step": "starting", "done": 0, "total": 1, "at": time.time()}
-    threading.Thread(target=_run, args=(mid, mid, bool(body.get("log", True))), daemon=True,
+    threading.Thread(target=_run, args=(mid, mid, bool(body.get("log", True)), bool(body.get("network", False))), daemon=True,
                      name=f"report-{mid}").start()
     return status(mid)
 
