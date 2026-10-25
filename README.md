@@ -40,8 +40,10 @@ web API only: no firmware changes, and nothing leaves your network unless you tu
   up 25 MHz at a time until a step isn't clean, confirms the fastest clean clock, then builds and tests
   the four clock presets.
 - **Notifications** on Telegram or Discord: a miner offline, too hot, low hashrate, restarted on its
-  own, a scheduled change that failed, a tuning run finished, a new best-share record, a weak chip, a
-  share rejected for a reason other than stale. Each kind and each miner on or off.
+  own (with its best share before the restart), a scheduled change that failed, a tuning run finished, a
+  new best-share record, a new best share since restart, a block found (the miner counts one, or a share
+  reaches the network difficulty from your DATUM Gateway), a weak chip, a share rejected for a reason other
+  than stale. Each kind and each miner on or off.
 - **Pools:** tick the miners on the page, see every pool each one has and the one it mines on, switch, edit or
   remove a pool per miner, add a pool to all of them (each keeps its worker name), or switch every ticked
   miner to one pool. **Settings** (account, time zone, best share numbers, notifications, a Miner
@@ -282,7 +284,9 @@ More on running it outside Umbrel (and what to report when testing): [TESTING.md
   apps you trust. Changes still need this app's own pages (a request header other pages can't add),
   but your session cookie is sent to any app on that host.
 - **Outbound traffic:** the app talks to your miners, and to nothing else unless you set up
-  notifications: then only to `api.telegram.org` and/or `discord.com` (the webhook you paste). The bot
+  notifications: then only to `api.telegram.org` and/or `discord.com` (the webhook you paste). If you
+  enter a DATUM Gateway address for block alerts, it also reads the network difficulty from that address
+  on your network (once a minute, no login). The bot
   token and webhook URL are kept in `miners.json` and never sent back to the page.
 - `miners.json` holds your miners' admin passwords (the miners need them in clear text); the app keeps
   it readable by itself only.

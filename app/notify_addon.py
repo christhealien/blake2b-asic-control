@@ -10,7 +10,15 @@ Miner page or in Settings):
   schedule      a scheduled preset change or restart didn't go through
   tuner         a tuning run finished (or stopped)
   best          a new best-share record
+  session_best  a new best share since the miner last restarted (since 1.22.0; not in the first 10 minutes
+                after a restart, when every share is a new best, and at most once per cooldown)
+  block         a block found: the miner's own "Found Blocks" count went up, or its best share since
+                restart reached the network difficulty that DATUM Gateway reports (since 1.22.0)
   chip          a chip's health turned weak
+
+A restart message (on its own, or one the app started) also says what the miner's best share was before it.
+The network difficulty comes from DATUM Gateway's JSON API (GET <datum_url>/v1/current_stratum_job, no login),
+only when a DATUM address is set; it's read at most once a minute and goes nowhere else.
 
 The same thing for the same miner is sent at most once per cooldown (30 min by default); "back online"
 and "cooled down" always go through. Nothing is sent until a channel is set up and switched on, and the
@@ -26,6 +34,7 @@ Routes (behind the login, wired through fan_addon):
   POST /api/notify/test            {channel: "telegram" | "discord"}
   POST /api/notify/miner           {miner_id, enabled}
   POST /api/notify/telegram_chats  {bot_token?}  the chats that have messaged the bot (to find the chat ID)
+  POST /api/notify/datum           {datum_url?}   read the network difficulty from DATUM Gateway now (a check)
 """
 from __future__ import annotations
 
@@ -48,6 +57,8 @@ EVENTS: list[tuple[str, str, bool]] = [
     ("schedule", "A scheduled change or restart didn't go through", True),
     ("tuner", "A tuning run finished", True),
     ("best", "New best-share record", True),
+    ("session_best", "New best share since the miner restarted", True),
+    ("block", "Block found (the miner counts one, or a share reaches the network difficulty)", True),
     ("chip", "A chip turned weak", True),
     ("reject", "A share rejected for a reason other than stale", True),
 ]
@@ -58,6 +69,9 @@ APP_RESTART_QUIET_S = 900  # an uptime drop this soon after the app restarted it
 TICK_S = 30
 TG_TOKEN = re.compile(r"^\d{5,12}:[A-Za-z0-9_-]{30,60}$")
 TG_CHAT = re.compile(r"^(-?\d{1,20}|@[A-Za-z0-9_]{5,32})$")
+DATUM_URL = re.compile(r"^https?://[A-Za-z0-9.\-]{1,253}(?::\d{1,5})?/?$")   # just scheme, host and port
+SESSION_WARMUP_S = 600     # no "new best since restart" in the first 10 minutes after a restart
+NETDIFF_TTL_S = 60.0
 DISCORD_HOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/webhooks/\d{5,25}/[A-Za-z0-9_-]{20,100}$")
 
 _srv: Callable[[], Any] = lambda: None                 # set by fan_addon
@@ -89,6 +103,7 @@ def _cfg(doc: dict[str, Any] | None = None) -> dict[str, Any]:
     c["events"] = ev
     for k, (_lo, _hi, d) in NUMS.items():
         c.setdefault(k, d)
+    c.setdefault("datum_url", "")
     return c
 
 
@@ -122,6 +137,7 @@ def state() -> dict[str, Any]:
                         "webhook_hint": _mask(d.get("webhook_url"))},
             "events": c["events"], "event_list": [{"key": k, "label": l} for k, l, _on in EVENTS],
             **{k: c[k] for k in NUMS},
+            "datum_url": c.get("datum_url") or "", "datum": dict(_netdiff_last),
             "active": _channels(c),
             "miners": [{"id": _row_id(m), "name": m.get("name") or _row_id(m), "enabled": bool(m.get("notify"))}
                        for m in doc.get("miners") or [] if not m.get("demo") and m.get("ip")],
@@ -168,6 +184,15 @@ def save(body: dict[str, Any]) -> dict[str, Any]:
     ev = body.get("events")
     if isinstance(ev, dict):
         c["events"] = {k: bool(ev.get(k, c["events"].get(k))) for k, _l, _on in EVENTS}
+    if "datum_url" in body:
+        u = str(body.get("datum_url") or "").strip().rstrip("/")
+        if u and "://" not in u:
+            u = "http://" + u
+        if u and not DATUM_URL.match(u):
+            raise ValueError("the DATUM Gateway address is like http://192.168.1.10:7152 (what you open its dashboard with)")
+        if u != c.get("datum_url"):
+            _netdiff_cache.clear()
+        c["datum_url"] = u
     for k, (lo, hi, _d) in NUMS.items():
         if k in body:
             try:
@@ -341,7 +366,8 @@ def note_app_restart(ip: str) -> None:
 def app_restart_done(mid: str, st: dict[str, Any]) -> None:
     state_ = st.get("state")
     if state_ == "done":
-        emit(mid, "app_restart", f"🔄 restarted, hashing again after {st.get('took_s')} s", key=f"app_restart:{st.get('since')}")
+        emit(mid, "app_restart", f"🔄 restarted, hashing again after {st.get('took_s')} s" + _best_before(mid),
+             key=f"app_restart:{st.get('since')}")
     else:
         emit(mid, "app_restart", f"⚠️ restart: {st.get('msg')}", key=f"app_restart:{st.get('since')}")
 
@@ -366,6 +392,103 @@ def reject_problem(mid: str, text: str) -> None:
 def best_share(mid: str, best_text: str, prev_text: str, on: str) -> None:
     emit(mid, "best", f"🏆 new best-share record {best_text} (was {prev_text})" + (f" on {on}" if on else ""),
          key=f"best:{best_text}", recovery=True)
+
+
+def _uptime(s: float) -> str:
+    s = max(0, int(s))
+    return f"{s // 86400} d {s % 86400 // 3600} h" if s >= 86400 else f"{s // 3600} h {s % 3600 // 60} min"
+
+
+def session_best(mid: str, best_text: str, prev_text: str, on: str, elapsed: float) -> None:
+    """A new best share since the miner last restarted (shares_addon calls this, after the warm-up)."""
+    emit(mid, "session_best", f"⭐ new best share since restart {best_text} (was {prev_text}), up {_uptime(elapsed)}"
+         + (f", on {on}" if on else ""), key="session_best")
+
+
+_block_told: set[tuple[str, str]] = set()
+
+
+def block_found(mid: str, text: str, key: str) -> None:
+    """A block (or a share that should be one): never held back by the cooldown, and sent once per key."""
+    if (mid, key) in _block_told:
+        return
+    if emit(mid, "block", "🎉 " + text, key="block:" + key, recovery=True):
+        _block_told.add((mid, key))
+
+
+# ---------------------------------------------------------------- network difficulty (DATUM Gateway)
+
+_netdiff_cache: dict[str, Any] = {}
+_netdiff_last: dict[str, Any] = {}       # for Settings: the last check, ok or not
+
+
+def _fetch_netdiff(url: str) -> dict[str, Any]:
+    req = urllib.request.Request(url.rstrip("/") + "/v1/current_stratum_job",
+                                 headers={"Accept": "application/json", "User-Agent": "Blake2b-ASIC-Control"})
+    try:
+        with urllib.request.urlopen(req, timeout=6) as r:
+            j = json.loads(r.read(262144))
+    except urllib.error.HTTPError as e:
+        hint = (" (this DATUM Gateway has no JSON API: update it, or switch on api.json_api in its config)"
+                if e.code == 404 else "")
+        raise RuntimeError(f"DATUM answered HTTP {e.code}{hint}")
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"couldn't reach DATUM Gateway at {url} ({getattr(e, 'reason', e)})")
+    except ValueError:
+        raise RuntimeError("DATUM's answer wasn't JSON (is that the dashboard address and port?)")
+    d = j.get("block_difficulty") if isinstance(j, dict) else None
+    if not isinstance(d, (int, float)) or d <= 0:
+        raise RuntimeError("DATUM didn't report a network difficulty yet (still starting?)")
+    return {"difficulty": float(d), "height": j.get("block_height")}
+
+
+def network_difficulty() -> float | None:
+    """The network difficulty from DATUM Gateway (the same unit the miners count shares in), or None when no
+    DATUM address is set or it can't be read. Cached for a minute."""
+    try:
+        url = _cfg().get("datum_url") or ""
+    except Exception:
+        return None
+    if not url:
+        return None
+    now = time.time()
+    if _netdiff_cache.get("url") == url and now - float(_netdiff_cache.get("at") or 0) < NETDIFF_TTL_S:
+        return _netdiff_cache.get("difficulty")
+    try:
+        r = _fetch_netdiff(url)
+        _netdiff_cache.update(url=url, at=now, difficulty=r["difficulty"])
+        _netdiff_last.clear()
+        try:
+            import shares_addon
+            text = shares_addon.fmt_difficulty(r["difficulty"])
+        except Exception:
+            text = f"{r['difficulty']:.4g}"
+        _netdiff_last.update(ok=True, at=int(now), difficulty=r["difficulty"], text=text, height=r.get("height"))
+        return r["difficulty"]
+    except Exception as e:
+        _netdiff_cache.update(url=url, at=now, difficulty=None)
+        _netdiff_last.clear()
+        _netdiff_last.update(ok=False, at=int(now), error=str(e)[:200])
+        return None
+
+
+def datum_check(body: dict[str, Any]) -> dict[str, Any]:
+    """Settings -> Check DATUM: read the network difficulty now, from the address typed (or the saved one)."""
+    u = str(body.get("datum_url") or "").strip().rstrip("/") or (_cfg().get("datum_url") or "")
+    if u and "://" not in u:
+        u = "http://" + u
+    if not u or not DATUM_URL.match(u):
+        raise ValueError("enter DATUM Gateway's address first, like http://192.168.1.10:7152")
+    try:
+        r = _fetch_netdiff(u)
+    except RuntimeError as e:
+        raise ValueError(str(e))
+    try:
+        import shares_addon
+        text = shares_addon.fmt_difficulty(r["difficulty"])
+    except Exception:
+        text = f"{r['difficulty']:.4g}"
+    return {"ok": True, "difficulty": r["difficulty"], "difficulty_text": text, "height": r.get("height")}
 
 
 # ---------------------------------------------------------------- the watcher
@@ -395,7 +518,23 @@ def _read(row: dict[str, Any]) -> dict[str, Any]:
     if not mhs:
         mhs = float(s.get("MHS 20s") or s.get("MHS av") or 0)
     return {"elapsed": float(s.get("Elapsed") or 0), "mhs": mhs, "temp": max(temps) if temps else None,
-            "clock": max(clocks) if clocks else None}
+            "clock": max(clocks) if clocks else None, "best": float(s.get("Best Share") or 0)}
+
+
+def _best_before(mid: str) -> str:
+    """'; best share before it: 1.2T': the miner's best share at the last reading before its latest restart
+    (or ""). The watcher keeps it when it sees the uptime go back; a restart the app started can be reported
+    before the watcher has seen it, and then the last reading is still from before the restart."""
+    st = _state.get(mid) or {}
+    seen = time.time() - float(st.get("restart_seen_at") or 0) < APP_RESTART_QUIET_S
+    b = float((st.get("best_before") if seen else st.get("best")) or 0)
+    if b <= 0:
+        return ""
+    try:
+        import shares_addon
+        return f"; best share before it: {shares_addon.fmt(b)}"
+    except Exception:
+        return ""
 
 
 def _fmt_ths(mhs: float) -> str:
@@ -445,12 +584,16 @@ def _check(row: dict[str, Any], c: dict[str, Any], now: float) -> None:
     # restarted on its own
     last_el = st.get("elapsed")
     if last_el is not None and r["elapsed"] + 60 < last_el:
+        st["best_before"], st["restart_seen_at"] = st.get("best") or 0, now
         app = now - _app_restart_at.get(str(row.get("ip")), 0) < APP_RESTART_QUIET_S
         if not app and not tuning and not _restarting(mid) and not idle and now - _idle_changed.get(mid, 0) > APP_RESTART_QUIET_S:
-            emit(mid, "self_restart", f"♻️ its mining software restarted on its own (it had been up {int(last_el / 3600)} h {int(last_el % 3600 / 60)} min)",
-                 key="self_restart")
+            emit(mid, "self_restart", f"♻️ its mining software restarted on its own (it had been up {int(last_el / 3600)} h {int(last_el % 3600 / 60)} min)"
+                 + _best_before(mid), key="self_restart")
         st["hist"] = []
     st["elapsed"] = r["elapsed"]
+    if r["best"] > 0 and (st.get("elapsed_best") is None or r["elapsed"] >= float(st.get("elapsed_best") or 0)):
+        st["best"] = r["best"]
+    st["elapsed_best"] = r["elapsed"]
     # hot
     hot = float(c["hot_c"])
     if r["temp"] is not None:
@@ -519,4 +662,4 @@ def tick() -> None:
 
 ROUTES_GET = {"/api/notify/state": state}
 ROUTES_POST = {"/api/notify/save": save, "/api/notify/test": test, "/api/notify/miner": set_miner,
-               "/api/notify/telegram_chats": telegram_chats}
+               "/api/notify/telegram_chats": telegram_chats, "/api/notify/datum": datum_check}

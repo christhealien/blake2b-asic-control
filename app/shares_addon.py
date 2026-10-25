@@ -40,6 +40,11 @@ _running: Callable[[str], bool] = lambda mid: False
 _notify: Callable[[str, str, str, str], None] = lambda mid, best, prev, on: None   # notify_addon.best_share
 _observe: Callable[[str, dict], Any] = lambda mid, summary: None                  # rejects_addon.observe
 _history: Callable[[str, dict, str], Any] = lambda mid, summary, on: None         # hashrate_addon.observe
+# since 1.22.0, set by fan_addon from notify_addon
+_notify_session: Callable[[str, str, str, str, float], None] = lambda mid, best, prev, on, up: None
+_notify_block: Callable[[str, str, str], None] = lambda mid, text, key: None
+_netdiff: Callable[[], float | None] = lambda: None
+SESSION_WARMUP_S = 600    # no "new best since restart" in the first 10 minutes (every share is a new best then)
 
 
 def path() -> Path:
@@ -80,6 +85,19 @@ def fmt_hashes(v: Any) -> str:
     letter right after the number. 1261948.2 -> '5.42P', 16384 -> '70.37T'."""
     try:
         v = float(v) * MINER_DIFF_UNIT
+    except (TypeError, ValueError):
+        return "–"
+    for unit, div in _SI:
+        if v >= div:
+            return f"{v / div:.2f}".rstrip("0").rstrip(".") + unit
+    return f"{v:.0f}"
+
+
+def fmt_difficulty(v: Any) -> str:
+    """A difficulty as mempool and DATUM's network difficulty show it (no x 2^32): 1.4567e14 -> '145.67T'.
+    The miner's own share numbers are in the same unit, so a share and the network difficulty compare as is."""
+    try:
+        v = float(v)
     except (TypeError, ValueError):
         return "–"
     for unit, div in _SI:
@@ -174,6 +192,37 @@ def _read(client: Any, mid: str = "") -> tuple[float, float, float | None, dict]
     return float(s.get("Best Share") or 0), float(s.get("Elapsed") or 0), clock, s
 
 
+def blocks(e: dict[str, Any], found: float, best: float, elapsed: float, netdiff: float | None,
+           now: float | None = None) -> list[tuple[str, str]]:
+    """What block news one reading brings (pure: easy to test). e is the miner's entry after update(); found is
+    the miner's own "Found Blocks" count since its restart. Returns [(text, key)] and remembers in e what was
+    told, so nothing is told twice:
+      - the count went up within the same restart (or is above 0 at the first reading after a restart);
+      - the best share since restart reached the network difficulty (from DATUM Gateway), once per share."""
+    now = time.time() if now is None else now
+    out: list[tuple[str, str]] = []
+    s = e.get("session") or {}
+    sid = s.get("sid")
+    b = e.get("blocks") or {}
+    if b.get("sid") != sid:
+        prev_known = "sid" in b                     # a restart since the last reading (not the very first one)
+        b = {"sid": sid, "found": 0.0, "told_best": 0.0}
+        if prev_known and found > 0:
+            out.append((f"BLOCK FOUND: the miner counts {found:.0f} found block{'s' if found != 1 else ''} since its "
+                        f"restart. Check DATUM Gateway and your node.", f"{sid}:{found:.0f}"))
+    elif found > float(b.get("found") or 0):
+        out.append((f"BLOCK FOUND: the miner's found-block count went from {float(b.get('found') or 0):.0f} to "
+                    f"{found:.0f}. Check DATUM Gateway and your node.", f"{sid}:{found:.0f}"))
+    b["found"] = max(found, float(b.get("found") or 0))
+    if netdiff and best >= netdiff and best > float(b.get("told_best") or 0):
+        out.append((f"a share of difficulty {fmt_difficulty(best)} reached the network difficulty "
+                    f"{fmt_difficulty(netdiff)}: that's a block if the pool took it. Check DATUM Gateway and your "
+                    f"node.", f"{sid}:share:{best:.0f}"))
+        b["told_best"] = best
+    e["blocks"] = b
+    return out
+
+
 def _poll() -> None:
     from miner_client import MinerClient
     try:
@@ -196,20 +245,42 @@ def _poll() -> None:
                 _history(mid, summ, on)    # the Fleet card's hashrate graph
             except Exception as e:
                 print(f"[hashrate] {mid}: {e}", flush=True)
-            readings.append((mid, best, elapsed, on))
+            try:
+                found = float(summ.get("Found Blocks") or 0)
+            except (TypeError, ValueError):
+                found = 0.0
+            readings.append((mid, best, elapsed, on, found))
         if readings:
+            netdiff = None
+            try:
+                netdiff = _netdiff()            # DATUM Gateway's network difficulty, if an address is set
+            except Exception:
+                pass
+            told: list[tuple[Callable[..., None], tuple]] = []
             with _lock:
                 doc = load()
-                for r in readings:
-                    old = max((float(h.get("best") or 0) for h in (doc.get(r[0]) or {}).get("history") or []), default=0.0)
-                    e = update(doc, *r)
+                for mid, best, elapsed, on, found in readings:
+                    prev = doc.get(mid) or {}
+                    old = max((float(h.get("best") or 0) for h in prev.get("history") or []), default=0.0)
+                    ps = prev.get("session") or {}
+                    old_sid, old_sbest = ps.get("sid"), float(ps.get("best") or 0)
+                    e = update(doc, mid, best, elapsed, on)
                     new = max((float(h.get("best") or 0) for h in e.get("history") or []), default=0.0)
+                    s = e.get("session") or {}
                     if old > 0 and new > old:
-                        try:
-                            _notify(r[0], fmt(new), fmt(old), r[3])
-                        except Exception:
-                            pass
+                        told.append((_notify, (mid, fmt(new), fmt(old), on)))
+                    elif (s.get("sid") == old_sid and old_sbest > 0 and float(s.get("best") or 0) > old_sbest
+                          and elapsed >= SESSION_WARMUP_S):
+                        # a new best since restart (a new record is told as a record instead)
+                        told.append((_notify_session, (mid, fmt(s["best"]), fmt(old_sbest), on, elapsed)))
+                    for text, key in blocks(e, found, best, elapsed, netdiff):
+                        told.append((_notify_block, (mid, text, key)))
                 _save(doc)
+            for fn, args in told:                  # sent after the file is saved and the lock let go
+                try:
+                    fn(*args)
+                except Exception as ex:
+                    print(f"[shares] notify: {ex}", flush=True)
     except Exception as e:
         print(f"[shares] {e}", flush=True)
     finally:

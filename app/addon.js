@@ -1450,7 +1450,12 @@
     const n = await loadNotify(); if (!n) { panel.innerHTML = `<h2>Notifications</h2><p class="muted">Couldn't load.</p>`; return; }
     const num = (k, v, unit) => `<input type="number" data-num="${k}" value="${esc(v)}" /> ${unit}`;
     const evExtra = { offline: () => `after ${num("offline_min", n.offline_min, "min")}`, hot: () => `at ${num("hot_c", n.hot_c, "°C")}`,
-                      hashrate: () => `under ${num("low_pct", n.low_pct, "%")} of its usual for 10 min` };
+                      hashrate: () => `under ${num("low_pct", n.low_pct, "%")} of its usual for 10 min`,
+                      session_best: () => "not in the first 10 min after a restart",
+                      block: () => (n.datum_url ? "network difficulty from DATUM Gateway (below)" : "set DATUM Gateway's address below to also compare shares with the network difficulty") };
+    const dt = n.datum || {};
+    const dtLine = !n.datum_url ? "" : dt.ok ? `last read: network difficulty ${esc(dt.text || "")}${dt.height ? ` at block ${esc(dt.height)}` : ""}`
+      : dt.error ? `<span style="color:var(--warn)">${esc(dt.error)}</span>` : "not read yet";
     panel.innerHTML = `<div class="row" style="justify-content:space-between"><h2 style="margin:0">Notifications</h2>
         <span class="pill ${n.active.length ? "ok" : ""}">${n.active.length ? "sending to " + esc(n.active.join(" + ")) : "off"}</span></div>
       <p class="muted" style="margin:.3rem 0 .2rem;font-size:.85rem">Get a message on Telegram or Discord when something happens to a
@@ -1475,7 +1480,13 @@
       <div>${n.event_list.map(e => `<div class="nt-ev"><label class="check"><input type="checkbox" data-ev="${esc(e.key)}" ${n.events[e.key] ? "checked" : ""} /> ${esc(e.label)}</label>
         ${evExtra[e.key] ? `<span class="muted">${evExtra[e.key]()}</span>` : ""}</div>`).join("")}</div>
       <div class="nt-ev"><span class="muted">The same alert for the same miner at most once every</span> ${num("cooldown_min", n.cooldown_min, "min")}
-        <span class="muted">("back online" and "cooled down" always go through)</span></div>
+        <span class="muted">("back online", "cooled down", records and blocks always go through)</span></div>
+      <h3 style="margin:.6rem 0 .2rem;font-size:.95rem">DATUM Gateway <span class="muted" style="font-weight:400;font-size:.8rem">(optional, for block alerts)</span></h3>
+      <div class="nt-ev" style="flex-wrap:wrap"><label class="nt-f" style="flex:1 1 18rem">Address <input type="text" id="ntDatum" value="${esc(n.datum_url || "")}" placeholder="http://192.168.1.10:7152" autocomplete="off" /></label>
+        <button type="button" id="ntDatumChk">Check</button><span class="muted" id="ntDatumState" style="font-size:.85rem">${dtLine}</span></div>
+      <p class="nt-help">The address you open DATUM Gateway's dashboard with. The app reads the network difficulty from its JSON API
+        once a minute (nothing else, no login) and sends a block alert when a miner's best share since restart reaches it.
+        The miner's own found-block count is watched either way.</p>
       <h3 style="margin:.6rem 0 .2rem;font-size:.95rem">Miners</h3>
       <div class="nt-miners">${n.miners.map(m => `<label class="check"><input type="checkbox" data-nm="${esc(m.id)}" ${m.enabled ? "checked" : ""} /> ${esc(m.name)}</label>`).join("")
         || `<span class="muted">No miners yet.</span>`}</div>
@@ -1488,6 +1499,7 @@
       if ($("ntDcUrl").value.trim()) b.discord.webhook_url = $("ntDcUrl").value.trim();
       panel.querySelectorAll("[data-ev]").forEach(x => b.events[x.dataset.ev] = x.checked);
       panel.querySelectorAll("[data-num]").forEach(x => { if (x.value.trim() !== "") b[x.dataset.num] = Number(x.value); });   // empty: keep the saved value
+      b.datum_url = $("ntDatum").value.trim();
       return b;
     };
     const saveAll = async (quiet) => {
@@ -1504,6 +1516,13 @@
       catch (e) { toast(e.message, true); }
     };
     $("ntTgTest").onclick = test("telegram"); $("ntDcTest").onclick = test("discord");
+    $("ntDatumChk").onclick = async () => {
+      const st = $("ntDatumState"); st.textContent = "reading…";
+      try {
+        const j = await api("POST", "/api/notify/datum", { datum_url: $("ntDatum").value.trim() });
+        st.innerHTML = `<span style="color:var(--ok)">✓</span> network difficulty ${esc(j.difficulty_text)}${j.height ? ` at block ${esc(j.height)}` : ""} · press Save to keep this address`;
+      } catch (e) { st.innerHTML = `<span style="color:var(--warn)">${esc(e.message)}</span>`; }
+    };
     $("ntTgFind").onclick = async () => {
       try {
         const j = await api("POST", "/api/notify/telegram_chats", { bot_token: $("ntTgTok").value.trim() });

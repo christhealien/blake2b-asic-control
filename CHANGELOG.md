@@ -3,6 +3,29 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.22.0 (2026-10-25)
+
+- **Notification: new best share since restart** (`session_best`, on by default). Sent when a miner's best share
+  since its mining software last started goes up, but not in the first 10 minutes after a restart (when nearly
+  every share is a new best), and at most once per cooldown. A share that's also a new all-time record is sent
+  as the record instead, never twice. Example: "⭐ new best share since restart 70.37T (was 35.2T), up 3 h 12 min,
+  on 615 MHz".
+- **Restart messages say the best share before the restart:** "restarted on its own" and the app's own restart
+  ("restarted, hashing again after 62 s") end with "; best share before it: 70.37T".
+- **Notification: block found** (`block`, on by default, never held back by the cooldown, sent once each).
+  Two signals:
+  - the miner's own found-block count (`Found Blocks` in its port-4028 summary) going up;
+  - its best share since restart reaching the **network difficulty from DATUM Gateway**, if its address is set
+    in Settings → Notifications → DATUM Gateway. The app reads `GET <address>/v1/current_stratum_job` (DATUM's
+    JSON API, no login) at most once a minute and uses only `block_difficulty` and `block_height`. Shares and
+    the network difficulty are compared in the miner's own unit, the same one DATUM's network difficulty uses,
+    and shown as mempool does (145.67T). An older DATUM without the JSON API is reported in Settings ("no JSON
+    API: update it, or switch on api.json_api").
+- Settings → Notifications: **DATUM Gateway** address field with a **Check** button (shows the network difficulty
+  and block height it read, or why it couldn't).
+- Code: `notify_addon.session_best`, `block_found`, `network_difficulty`, `datum_check` (`POST /api/notify/datum`);
+  `shares_addon.blocks` (pure, tested), `fmt_difficulty`.
+
 ## 1.21.1 (2026-10-22)
 
 - **Fixed: Profiles page empty until Probe.** The page's data (`/api/fans/state`) waited for a fresh
