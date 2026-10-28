@@ -3,6 +3,14 @@
 Every version of Blake2b ASIC Control, newest first. The Umbrel store shows the same notes, shorter,
 under "What's new" (`releaseNotes` in `blake2b-asic-control/umbrel-app.yml`).
 
+## 1.22.1 (2026-10-28)
+
+- **Widgets honour "Both" for best share.** With Settings → Best share numbers set to **Both**, the Umbrel
+  widgets now show both numbers, matching the dashboard. The overview's Best share tile shows the
+  DATUM/mempool value with the miner's own number on the line beneath it; each miner's line in the list
+  widget shows it in parentheses (`best 112P (26.1M)`). "Like DATUM & mempool" and "The miner's own numbers"
+  are unchanged (one number). (`widget_server.py`: `_best_sub`, `_best_inline`, shared `_short` helper.)
+
 ## 1.22.0 (2026-10-25)
 
 - **Notification: new best share since restart** (`session_best`, on by default). Sent when a miner's best share

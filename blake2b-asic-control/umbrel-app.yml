@@ -2,9 +2,9 @@ manifestVersion: 1
 id: blake2b-asic-control
 name: Blake2b ASIC Control
 tagline: A fleet dashboard, presets, schedules and a per-chip auto-tuner for Blake2b miners
-icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.22.0
+icon: https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/icon.svg?v=1.22.1
 category: developer
-version: "1.22.0"
+version: "1.22.1"
 port: 8790
 description: >-
   A local control panel for the Blake2b miners on your network: the SC line (SC Lite,
@@ -48,14 +48,20 @@ submission: https://github.com/christhealien/blake2b-asic-control
 repo: https://github.com/christhealien/blake2b-asic-control
 support: https://github.com/christhealien/blake2b-asic-control/issues
 gallery:
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.22.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.22.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.22.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.22.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.22.0
-  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.22.0
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/1.png?v=1.22.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/2.png?v=1.22.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/3.png?v=1.22.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/4.png?v=1.22.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/5.png?v=1.22.1
+  - https://raw.githubusercontent.com/christhealien/blake2b-asic-control/master/blake2b-asic-control/gallery/6.png?v=1.22.1
 releaseNotes: |-
-  **What's new in 1.22.0**
+  **What's new in 1.22.1**
+
+  - When "Best share numbers" is set to **Both**, the home-screen widgets now show both numbers too: the
+    DATUM/mempool value with the miner's own number beneath it (overview), and in parentheses on each
+    miner's line.
+
+  **1.22.0**
 
   - **New notifications:** a new best share since the miner restarted, and a block found (the miner counts one,
     or a share reaches the network difficulty read from your DATUM Gateway). Restart messages now also say the

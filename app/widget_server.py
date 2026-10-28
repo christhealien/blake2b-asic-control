@@ -325,20 +325,39 @@ def overview() -> dict[str, Any]:
             second,
             power,
             {"title": "Best share", "text": _best3(top["best"]) if top else "–",
-             "subtext": ""},
+             "subtext": _best_sub(top["best"]) if top else ""},
         ],
     }
 
 
-def _best3(v: Any) -> str:
-    """A best share for the small widgets: three figures at most and no space, so a miner's numbers stay on one
-    line on a phone. '307.51P' -> '308P', '1.36E' stays, '1.26 M' -> '1.26M'."""
-    txt = shares_addon.fmt(v, short=True).replace(" ", "")
+def _short(txt: str) -> str:
+    """Three figures at most and no space, so a share fits one line on a phone. '307.51P' -> '308P',
+    '1.36E' stays, '1.26 M' -> '1.26M'."""
+    txt = txt.replace(" ", "")
     m = re.fullmatch(r"([0-9.]+)(\D*)", txt)
     if not m:
         return txt
     x = float(m.group(1))
     return (f"{x:.3g}" if x < 1000 else f"{x:.0f}") + m.group(2)
+
+
+def _best3(v: Any) -> str:
+    """The primary best-share number for a widget, per Settings -> Best share numbers (the DATUM one
+    when 'both' is picked; _best_sub / _best_inline add the miner's own number alongside it)."""
+    return _short(shares_addon.fmt(v, short=True))
+
+
+def _best_sub(v: Any) -> str:
+    """The miner's own number, for the overview tile's subtext line, only when 'both' is selected."""
+    return _short(shares_addon.fmt_miner(v)) if shares_addon.scale() == "both" else ""
+
+
+def _best_inline(v: Any) -> str:
+    """Best share for a one-line slot: both numbers ('112P (26.1M)') when 'both' is selected, else one."""
+    s = _best3(v)
+    if shares_addon.scale() == "both":
+        s += f" ({_short(shares_addon.fmt_miner(v))})"
+    return s
 
 
 def miner_list() -> dict[str, Any]:
@@ -361,7 +380,7 @@ def miner_list() -> dict[str, Any]:
         if m.get("max_t") is not None:
             bits.append(f"{m['max_t']:.0f}°")
         if m.get("best"):
-            bits.append(f"best {_best3(m['best'])}")
+            bits.append(f"best {_best_inline(m['best'])}")
         items.append({"subtext": head, "text": " · ".join(bits)})
     return {"type": "list", "refresh": REFRESH, "link": "", "items": items, "noItemsText": "No miners yet: add one under Settings"}
 
