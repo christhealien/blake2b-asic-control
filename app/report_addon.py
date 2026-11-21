@@ -88,14 +88,19 @@ def _ipv6_out(m: "re.Match[str]") -> str:
 
 _IPV6 = re.compile(r"(?<![\w:.])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?:%\w+)?(?![\w:])")   # checked below
 # a host with a port and no scheme, like a pool address in a log line ("sc-us.example.tech:700")
-_HOSTPORT = re.compile(r"\b[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.(?!(?:py|js|c|h|cc|cpp|hpp|go|rs|sh|so|log|txt|json|cfg|conf|ini|html?|css|lua)\b)[A-Za-z]{2,}:\d{2,5}\b")   # not file.py:123
+_HOSTPORT = re.compile(r"\b[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}\.(?!(?:py|js|c|h|cc|cpp|hpp|go|rs|sh|so|log|txt|json|cfg|conf|ini|html?|css|lua)\b)[A-Za-z]{2,}:\d{2,5}\b")   # not file.py:123
 _LONG = re.compile(r"[A-Za-z0-9_\-=]{24,}")
 _MAC12 = re.compile(r"\b[0-9A-Fa-f]{12}\b")
 _LOG_DROP = re.compile(r"pool|stratum|user|worker|wallet|passw|authori[sz]e|subscri|url|https?:|ssid|wifi|wlan|"
                        r"dns|gateway|dhcp|hostname|email|account|token|login", re.I)
 
 
+MAX_TEXT = 20_000   # longest string scrubbed; the rest is cut (hostile miner text made the regexes crawl)
+
+
 def scrub_text(s: str) -> str:
+    if len(s) > MAX_TEXT:
+        s = s[:MAX_TEXT] + " <cut>"
     s = _URL.sub("<url removed>", s)
     s = _EMAIL.sub("<email removed>", s)
     s = _MAC.sub("00:11:22:33:44:55", s)

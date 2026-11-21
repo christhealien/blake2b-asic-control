@@ -37,6 +37,8 @@ LOG_GAP_S = 300.0           # read a miner's log at most this often
 LOG_WAIT_S = 20.0           # wait this long after the count went up (the line is written at once, but be kind)
 LOG_GIVE_UP_S = 900.0       # rejects the log hasn't shown after this long are "not seen in the log"
 KEYS_KEPT = 400
+EVENTS_MAX = 1000          # most events kept per miner (a hostile miner can't grow the file)
+REASON_MAX = 120
 HIGH_PCT, HIGH_MIN = 1.0, 20    # "above the usual" wording: at least 1 % of accepted and 20 rejects in 24 h
 
 _lock = threading.Lock()
@@ -131,7 +133,7 @@ def observe(mid: str, summary: dict[str, Any], now: float | None = None) -> dict
 
 
 def _expire(e: dict[str, Any], now: float) -> None:
-    e["events"] = [x for x in e.get("events") or [] if float(x.get("t") or 0) > now - EVENTS_KEPT_S]
+    e["events"] = [x for x in e.get("events") or [] if float(x.get("t") or 0) > now - EVENTS_KEPT_S][-EVENTS_MAX:]
     p = e.get("pending")
     if p and p.get("n", 0) > 0 and now - float(p.get("since") or now) > LOG_GIVE_UP_S:
         e["events"].append({"t": float(p["since"]), "kind": "unseen", "n": int(p["n"])})
@@ -158,7 +160,7 @@ def fold_log(e: dict[str, Any], lines: list[dict[str, str]], now: float) -> list
             continue
         ev = {"t": now, "at": ln["at"], "kind": ln["kind"], "n": 1}
         if ln["kind"] == "other":
-            ev["reason"] = ln["reason"]
+            ev["reason"] = str(ln["reason"])[:REASON_MAX]
         new.append(ev)
     e["keys"] = (list(e.get("keys") or []) + [ln["key"] for ln in lines if ln["key"] not in known])[-KEYS_KEPT:]
     left = int(p.get("n") or 0) - len(take)

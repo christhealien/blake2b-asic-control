@@ -227,11 +227,30 @@ def _drop_all_sessions() -> None:
 BEHIND_PROXY = os.environ.get("SCLITE_BEHIND_PROXY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+PROXY_HOST = os.environ.get("SCLITE_PROXY_HOST", "blake2b-asic-control_app_proxy_1").strip()
+_proxy_cache: tuple[float, set[str]] = (0.0, set())
+
+
+def _is_proxy(peer: str) -> bool:
+    """True only if the connection comes from Umbrel's app_proxy container, so another container on the
+    same network can't set X-Forwarded-For to dodge the login back-off."""
+    global _proxy_cache
+    import socket
+    now = time.time()
+    if now - _proxy_cache[0] > 30:
+        try:
+            ips = {a[4][0] for a in socket.getaddrinfo(PROXY_HOST, None)} if PROXY_HOST else set()
+        except OSError:
+            ips = set()
+        _proxy_cache = (now, ips)
+    return peer in _proxy_cache[1]
+
+
 def _client(handler: Any) -> str:
     """Who's asking, for the login back-off. Behind a proxy that says so (SCLITE_BEHIND_PROXY=1, set
     for Umbrel's app_proxy) it's the address the proxy forwards; otherwise the header is whatever the
     client sent, so only the socket's address counts."""
-    if BEHIND_PROXY:
+    if BEHIND_PROXY and _is_proxy(str(handler.client_address[0])):
         # the last entry is the one the proxy added (earlier ones are whatever the client sent)
         fwd = (handler.headers.get("X-Forwarded-For") or "").split(",")[-1].strip()
         if fwd:

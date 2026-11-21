@@ -252,7 +252,7 @@ def patch_server_fans(text: str) -> str:
                "            self.send_header(\"Cache-Control\", \"no-cache\")\n"
                "        # added: no framing by other sites or apps (clickjacking), no MIME sniffing, no referrers\n"
                "        self.send_header(\"X-Frame-Options\", \"DENY\")\n"
-               "        self.send_header(\"Content-Security-Policy\", \"frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'\")\n"
+               "        self.send_header(\"Content-Security-Policy\", \"frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; connect-src 'self'\")\n"
                "        self.send_header(\"X-Content-Type-Options\", \"nosniff\")\n"
                "        self.send_header(\"Referrer-Policy\", \"same-origin\")\n"
                "        super().end_headers()\n\n")
@@ -470,7 +470,7 @@ def patch_appjs(text: str) -> str:
         if a in text:
             text = text.replace(a, b)
         else:
-            print(f"app.js: couldn't escape {a[:40]!r} (changed upstream); miner values are also cleaned on the server")
+            raise SystemExit(f"app.js: couldn't escape {a[:40]!r} (changed upstream); refusing to build without this security patch")
     # "Failback" is network jargon (and easily read as "fallback", the opposite): say what it does
     for a, b in (('confirm("Failback to preferred + soft restart?")',
                   'confirm("Switch this miner to that pool (it becomes its first pool) and restart its miner software?")'),
