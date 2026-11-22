@@ -1,3 +1,5 @@
+> **This project is retired and archived.** It is no longer maintained, and it has been removed from the christhealien Umbrel store. No further updates or security fixes will be published.
+
 # Blake2b ASIC Control
 
 A fleet dashboard, one-click presets, schedules, alerts and a per-chip auto-tuner for **Blake2b
